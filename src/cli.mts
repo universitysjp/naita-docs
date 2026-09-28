@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 
-import { main } from './cli/main.mts';
+import { main } from "./cli/main.mts";
 
-main().catch((error) => {
-  console.error(`Error: ${error.message}`);
+try {
+  await main();
+} catch (error) {
+  console.error(`Error: ${error instanceof Error ? error.message : error}`);
   process.exitCode = 1;
-});
+}

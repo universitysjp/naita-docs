@@ -1,265 +1,348 @@
-import { SECTIONS } from '../diary/entries.mts';
-import { DiaryShell, type Choice } from './shell';
-import type { CommandRunner } from './client';
-import { showChecklist } from './checklist';
+import { SECTIONS } from "../diary/entries.mts";
+import { showChecklist } from "./checklist";
+import type {
+  CommandRunner,
+  DiaryStatus,
+  ScreenshotScan,
+  WeekDetail,
+  WeekIndex,
+} from "./client";
+import type { Choice, DiaryShell } from "./shell";
 
 export class WeekScreens {
-  constructor(
-    private ui: DiaryShell,
-    private run: CommandRunner,
-    private home: () => Promise<void>,
-  ) {}
+  private ui: DiaryShell;
+  private run: CommandRunner;
+  private home: () => Promise<void>;
+
+  constructor(ui: DiaryShell, run: CommandRunner, home: () => Promise<void>) {
+    this.ui = ui;
+    this.run = run;
+    this.home = home;
+  }
 
   async list() {
-    const result = await this.run('weeks');
-    const status = await this.run('status');
+    const result = await this.run<WeekIndex>("weeks");
+    const status = await this.run<DiaryStatus>("status");
     this.ui.show(
-      'Choose a week',
+      "Choose a week",
       `${status.completedWeeks}/${status.weeks.length} weeks ready. Open any week to continue.`,
-      result.weeks.map((week: any) => {
-        const progress = status.weeks.find((item: any) => item.number === week.number);
+      result.weeks.map((week) => {
+        const progress = status.weeks.find(
+          (item) => item.number === week.number
+        );
         return {
-          name: `Week ${week.number} | ${week.monday} | ${progress.percent}% filled`,
-          description: `${progress.screenshots.images.length} screenshots, ${progress.suggestions} suggestions, review ${progress.reviewed ? 'current' : 'needed'}`,
           action: () => this.week(week.number),
+          description: `${progress.screenshots.images.length} screenshots, ${progress.suggestions} suggestions, review ${progress.reviewed ? "current" : "needed"}`,
+          name: `Week ${week.number} | ${week.monday} | ${progress.percent}% filled`,
         };
       }),
-      this.home,
+      this.home
     );
   }
   async week(number: number) {
-    const status = await this.run('status', { week: String(number) });
-    const progress = status.weeks[0];
+    const status = await this.run<DiaryStatus>("status", {
+      week: String(number),
+    });
+    const [progress] = status.weeks;
     const missing = [...progress.missing, ...progress.missingDays];
     this.ui.show(
       `Week ${number} | ${progress.monday} to ${progress.sunday}`,
-      `${progress.percent}% filled | ${progress.screenshots.images.length} screenshots | ${progress.suggestions} suggestions\n${missing.length ? 'Still needed: ' + missing.join(', ') : 'Content filled. Review it when you are ready.'}${progress.conflicts.length ? '\nAttendance conflicts: ' + progress.conflicts.join(', ') : ''}`,
+      `${progress.percent}% filled | ${progress.screenshots.images.length} screenshots | ${progress.suggestions} suggestions\n${missing.length ? `Still needed: ${missing.join(", ")}` : "Content filled. Review it when you are ready."}${progress.conflicts.length ? `\nAttendance conflicts: ${progress.conflicts.join(", ")}` : ""}`,
       [
         ...Object.entries(SECTIONS).map(([section, label]) => ({
-          name: `${label} (${progress.sections[section]} points)`,
           action: () => this.section(number, section),
+          name: `${label} (${progress.sections[section]} points)`,
         })),
-        { name: 'Daily work', description: 'Add or edit a dated point', action: () => this.days(number) },
         {
-          name: 'Suggestions',
-          description: 'Draft, accept, answer, or dismiss',
+          action: () => this.days(number),
+          description: "Add or edit a dated point",
+          name: "Daily work",
+        },
+        {
           action: () => this.suggestions(number),
+          description: "Draft, accept, answer, or dismiss",
+          name: "Suggestions",
         },
         {
-          name: 'Screenshots',
-          description: 'View the folder, add captions, or mark not needed',
           action: () => this.screenshots(number),
+          description: "View the folder, add captions, or mark not needed",
+          name: "Screenshots",
         },
         {
-          name: 'Mark this week reviewed',
           action: async () => {
-            await this.run('review', { week: String(number) });
+            await this.run("review", { week: String(number) });
             await this.week(number);
           },
+          name: "Mark this week reviewed",
         },
       ],
-      () => this.list(),
+      () => this.list()
     );
   }
   async section(number: number, section: string, date?: string) {
-    const week = await this.run('show', { week: String(number) });
+    const week = await this.run<WeekDetail>("show", { week: String(number) });
     const points = date ? week.entry.days[date] : week.entry.sections[section];
     const target: Record<string, string> = date ? { date } : { section };
+    // SAFETY: when `date` is unset the only callers are the SECTIONS menu, which
+    // passes a key of SECTIONS, so the index below always exists.
     const label = date || SECTIONS[section as keyof typeof SECTIONS];
     const back = () => (date ? this.days(number) : this.week(number));
     const list = () => this.section(number, section, date);
-    const write = (id?: string, before?: string, text = '') =>
+    const write = (id?: string, before?: string, text = "") =>
       this.ui.form(
-        `${id ? 'Edit' : 'Add'} a point`,
-        [{ key: 'text', label: label, value: text }],
+        `${id ? "Edit" : "Add"} a point`,
+        [{ key: "text", label, value: text }],
         async (values) => {
-          await this.run(id ? 'edit' : 'add', {
+          const options = {
             week: String(number),
             ...target,
             text: values.text,
-            ...(id ? { id } : {}),
-            ...(before ? { before } : {}),
-          });
+          };
+          if (id) {
+            options.id = id;
+          }
+          if (before) {
+            options.before = before;
+          }
+          await this.run(id ? "edit" : "add", options);
           await list();
         },
-        list,
+        list
       );
     const choices: Choice[] = [
-      { name: 'Add a point', description: 'Write what you did in your own words', action: () => write() },
+      {
+        action: () => write(),
+        description: "Write what you did in your own words",
+        name: "Add a point",
+      },
     ];
-    for (const point of points)
+    for (const point of points) {
       choices.push({
-        name: point.text,
-        description: 'Edit, insert before, or remove this point',
         action: () =>
           this.ui.show(
             label,
             point.text,
             [
-              { name: 'Edit this point', action: () => write(point.id, undefined, point.text) },
-              { name: 'Insert a point before this', action: () => write(undefined, point.id) },
               {
-                name: 'Remove this point',
+                action: () => write(point.id, undefined, point.text),
+                name: "Edit this point",
+              },
+              {
+                action: () => write(undefined, point.id),
+                name: "Insert a point before this",
+              },
+              {
                 action: async () => {
-                  await this.run('edit', { week: String(number), ...target, id: point.id, remove: true });
+                  await this.run("edit", {
+                    id: point.id,
+                    ...target,
+                    remove: true,
+                    week: String(number),
+                  });
                   await list();
                 },
+                name: "Remove this point",
               },
             ],
-            list,
+            list
           ),
+        description: "Edit, insert before, or remove this point",
+        name: point.text,
       });
+    }
     this.ui.show(
       `Week ${number} | ${label}`,
-      `Each entry is a bullet point. ${date ? 'Git descriptions fill the daily table until you customize it.' : 'Write about the whole week.'}\nManual file: ${week.file}`,
+      `Each entry is a bullet point. ${date ? "Git descriptions fill the daily table until you customize it." : "Write about the whole week."}\nManual file: ${week.file}`,
       choices,
-      back,
+      back
     );
   }
   async days(number: number) {
-    const week = await this.run('show', { week: String(number) });
+    const week = await this.run<WeekDetail>("show", { week: String(number) });
     this.ui.show(
       `Week ${number} | Daily work`,
-      'Attendance is set from the home menu.',
+      "Attendance is set from the home menu.",
       week.days
-        .filter((day: any) => day.status === 'work')
-        .map((day: any) => ({
-          name: day.date,
+        .filter((day) => day.status === "work")
+        .map((day) => ({
+          action: () => this.section(number, "work", day.date),
           description: `${day.commits.length} commits; ${week.entry.days[day.date].length} saved points`,
-          action: () => this.section(number, 'work', day.date),
+          name: day.date,
         })),
-      () => this.week(number),
+      () => this.week(number)
     );
   }
   async suggestions(number: number) {
-    const week = await this.run('show', { week: String(number) });
+    const week = await this.run<WeekDetail>("show", { week: String(number) });
     const back = () => this.suggestions(number);
     const choices: Choice[] = [
       {
-        name: 'Prepare suggestions from Git history',
         action: async () => {
-          await this.run('draft', { week: String(number) });
+          await this.run("draft", { week: String(number) });
           await back();
         },
+        name: "Prepare suggestions from Git history",
       },
       {
-        name: 'Ask Codex to draft suggestions',
-        description: 'Codex returns reviewable proposals; accepted points stay separate',
         action: async () => {
-          await this.run('draft', { week: String(number), agent: 'codex' });
+          await this.run("draft", { agent: "codex", week: String(number) });
           await back();
         },
+        description:
+          "Codex returns reviewable proposals; accepted points stay separate",
+        name: "Ask Codex to draft suggestions",
       },
       {
-        name: 'Ask Claude Code to draft suggestions',
-        description: 'Claude Code returns reviewable proposals; accepted points stay separate',
         action: async () => {
-          await this.run('draft', { week: String(number), agent: 'claude' });
+          await this.run("draft", { agent: "claude", week: String(number) });
           await back();
         },
+        description:
+          "Claude Code returns reviewable proposals; accepted points stay separate",
+        name: "Ask Claude Code to draft suggestions",
       },
     ];
-    for (const suggestion of week.entry.suggestions)
+    for (const suggestion of week.entry.suggestions) {
       choices.push({
-        name: `${suggestion.section}: ${suggestion.text}`,
-        description: suggestion.kind === 'question' ? 'Your answer is needed' : 'Suggested wording for review',
         action: () => {
           const actions: Choice[] = [
             {
-              name: suggestion.kind === 'question' ? 'Answer and add to the diary' : 'Edit wording and accept',
               action: () =>
                 this.ui.form(
-                  'Your diary point',
+                  "Your diary point",
                   [
                     {
-                      key: 'text',
+                      key: "text",
                       label: suggestion.text,
-                      value: suggestion.kind === 'question' ? '' : suggestion.text,
+                      value:
+                        suggestion.kind === "question" ? "" : suggestion.text,
                     },
                   ],
                   async ({ text }) => {
-                    await this.run('accept', { week: String(number), id: suggestion.id, text });
+                    await this.run("accept", {
+                      id: suggestion.id,
+                      text,
+                      week: String(number),
+                    });
                     await back();
                   },
-                  back,
+                  back
                 ),
+              name:
+                suggestion.kind === "question"
+                  ? "Answer and add to the diary"
+                  : "Edit wording and accept",
             },
           ];
-          if (suggestion.kind === 'draft')
+          if (suggestion.kind === "draft") {
             actions.push({
-              name: 'Accept this wording',
               action: async () => {
-                await this.run('accept', { week: String(number), id: suggestion.id });
+                await this.run("accept", {
+                  id: suggestion.id,
+                  week: String(number),
+                });
                 await back();
               },
+              name: "Accept this wording",
             });
+          }
           actions.push({
-            name: 'Dismiss',
             action: async () => {
-              await this.run('dismiss', { week: String(number), id: suggestion.id });
+              await this.run("dismiss", {
+                id: suggestion.id,
+                week: String(number),
+              });
               await back();
             },
+            name: "Dismiss",
           });
-          this.ui.show('Review suggestion', `${suggestion.text}\n${suggestion.reason}`, actions, back);
+          this.ui.show(
+            "Review suggestion",
+            `${suggestion.text}\n${suggestion.reason}`,
+            actions,
+            back
+          );
         },
+        description:
+          suggestion.kind === "question"
+            ? "Your answer is needed"
+            : "Suggested wording for review",
+        name: `${suggestion.section}: ${suggestion.text}`,
       });
+    }
     this.ui.show(
       `Week ${number} | Suggestions`,
-      'Only accepted points appear in your diary. Answer questions from your own experience.',
+      "Only accepted points appear in your diary. Answer questions from your own experience.",
       choices,
-      () => this.week(number),
+      () => this.week(number)
     );
   }
   async screenshots(number: number) {
-    const result = await this.run('screenshots', { week: String(number) });
+    const result = await this.run<ScreenshotScan>("screenshots", {
+      week: String(number),
+    });
     const back = () => this.screenshots(number);
     const choices: Choice[] = [
       {
-        name: 'What screenshots should I add? (checklist)',
         action: () => showChecklist(this.ui, this.run, back, number),
+        name: "What screenshots should I add? (checklist)",
       },
-      { name: 'Refresh folder', action: back },
+      { action: back, name: "Refresh folder" },
       {
-        name: 'Set or clear a reason for no screenshots',
         action: () =>
           this.ui.form(
-            'Screenshots not needed',
+            "Screenshots not needed",
             [
               {
-                key: 'reason',
-                label: 'Reason (clear it to require screenshots again)',
-                value: result.notRequiredReason,
+                key: "reason",
+                label: "Reason (clear it to require screenshots again)",
                 optional: true,
+                value: result.notRequiredReason,
               },
             ],
             async ({ reason }) => {
-              await this.run('screenshots', { week: String(number), reason });
+              await this.run("screenshots", {
+                reason,
+                week: String(number),
+              });
               await back();
             },
-            back,
+            back
           ),
+        name: "Set or clear a reason for no screenshots",
       },
     ];
-    for (const image of result.images)
+    for (const image of result.images) {
       choices.push({
-        name: image.name,
-        description: image.caption,
         action: () =>
           this.ui.form(
-            'Screenshot caption',
-            [{ key: 'text', label: 'Briefly explain what the image shows', value: image.caption }],
+            "Screenshot caption",
+            [
+              {
+                key: "text",
+                label: "Briefly explain what the image shows",
+                value: image.caption,
+              },
+            ],
             async ({ text }) => {
-              await this.run('screenshots', { week: String(number), file: image.name, text });
+              await this.run("screenshots", {
+                file: image.name,
+                text,
+                week: String(number),
+              });
               await back();
             },
-            back,
+            back
           ),
+        description: image.caption,
+        name: image.name,
       });
+    }
     this.ui.show(
       `Week ${number} | Screenshots`,
-      `Put PNG or JPEG files here, then refresh:\n${result.folder}\n${result.errors.join('; ')}${result.ignored.length ? '\nUnsupported: ' + result.ignored.join(', ') : ''}`,
+      `Put PNG or JPEG files here, then refresh:\n${result.folder}\n${result.errors.join("; ")}${result.ignored.length ? `\nUnsupported: ${result.ignored.join(", ")}` : ""}`,
       choices,
-      () => this.week(number),
+      () => this.week(number)
     );
   }
 }

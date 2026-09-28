@@ -1,39 +1,60 @@
-import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from 'node:child_process';
+import {
+  spawn as nodeSpawn,
+  spawnSync as nodeSpawnSync,
+} from "node:child_process";
 
-export type ProcessResult = { success: boolean; stdout: string; stderr: string };
-
-export function runSync(command: string[], cwd: string): ProcessResult {
-  if (typeof Bun !== 'undefined') {
-    const result = Bun.spawnSync({ cmd: command, cwd, stdout: 'pipe', stderr: 'pipe' });
-    return { success: result.success, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
-  }
-  const result = nodeSpawnSync(command[0], command.slice(1), { cwd, encoding: 'utf8' });
-  return {
-    success: result.status === 0,
-    stdout: String(result.stdout ?? ''),
-    stderr: String(result.stderr ?? ''),
-  };
+export interface ProcessResult {
+  success: boolean;
+  stdout: string;
+  stderr: string;
 }
 
-export async function run(
+export const runSync = (command: string[], cwd: string): ProcessResult => {
+  if (typeof Bun !== "undefined") {
+    const result = Bun.spawnSync({
+      cmd: command,
+      cwd,
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+    return {
+      stderr: result.stderr.toString(),
+      stdout: result.stdout.toString(),
+      success: result.success,
+    };
+  }
+  const result = nodeSpawnSync(command[0], command.slice(1), {
+    cwd,
+    encoding: "utf-8",
+  });
+  return {
+    stderr: String(result.stderr ?? ""),
+    stdout: String(result.stdout ?? ""),
+    success: result.status === 0,
+  };
+};
+
+export const run = async (
   command: string[],
   cwd: string,
-  input = '',
-  timeoutMs = 180000,
-  options: { windowsVerbatimArguments?: boolean } = {},
-): Promise<ProcessResult> {
-  if (typeof Bun !== 'undefined') {
+  input = "",
+  timeoutMs = 180_000,
+  options: { windowsVerbatimArguments?: boolean } = {}
+): Promise<ProcessResult> => {
+  if (typeof Bun !== "undefined") {
     const child = Bun.spawn({
       cmd: command,
       cwd,
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
+      stderr: "pipe",
+      stdin: "pipe",
+      stdout: "pipe",
       windowsHide: true,
       ...options,
     });
     const timer = setTimeout(() => child.kill(), timeoutMs);
-    if (input) child.stdin.write(input);
+    if (input) {
+      child.stdin.write(input);
+    }
     child.stdin.end();
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
@@ -41,26 +62,33 @@ export async function run(
       child.exited,
     ]);
     clearTimeout(timer);
-    return { success: code === 0, stdout, stderr };
+    return { stderr, stdout, success: code === 0 };
   }
+  // The node:child_process fallback is a callback API with no promise
+  // equivalent; it only runs under Vitest's Node workers, never under Bun.
+  // oxlint-disable-next-line promise/avoid-new -- node callback API
   return await new Promise((resolve) => {
-    const child = nodeSpawn(command[0], command.slice(1), { cwd, windowsHide: true, ...options });
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (chunk) => (stdout += chunk));
-    child.stderr?.on('data', (chunk) => (stderr += chunk));
-    const timer = setTimeout(() => child.kill(), timeoutMs);
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      resolve({ success: false, stdout, stderr: error.message });
+    const child = nodeSpawn(command[0], command.slice(1), {
+      cwd,
+      windowsHide: true,
+      ...options,
     });
-    child.stdin?.on('error', (error) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => (stdout += chunk));
+    child.stderr?.on("data", (chunk) => (stderr += chunk));
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ stderr: error.message, stdout, success: false });
+    });
+    child.stdin?.on("error", (error) => {
       stderr += error.message;
     });
-    child.on('close', (code) => {
+    child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ success: code === 0, stdout, stderr });
+      resolve({ stderr, stdout, success: code === 0 });
     });
     child.stdin?.end(input);
   });
-}
+};

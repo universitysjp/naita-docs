@@ -32,32 +32,35 @@
     }
   </style>
   <nav>
-    <label>Page <input id="page" type="number" value="1" min="1" /></label><span id="count"></span
-    ><span id="state">Loading PDF</span>
+    <label>Page <input id="page" type="number" value="1" min="1" /></label
+    ><span id="count"></span><span id="state">Loading PDF</span>
   </nav>
   <canvas aria-label="Rendered diary page"></canvas>
   <div id="pdf-text"></div>
   <script type="module">
-    import { getDocument, GlobalWorkerOptions } from '/pdf.mjs';
-    GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
-    const pdf = await getDocument({ url: '/diary.pdf' }).promise;
-    const input = document.querySelector('input');
-    const canvas = document.querySelector('canvas');
-    document.querySelector('#count').textContent = `of ${pdf.numPages}`;
+    import { getDocument, GlobalWorkerOptions } from "/pdf.mjs";
+    GlobalWorkerOptions.workerSrc = "/pdf.worker.mjs";
+    const pdf = await getDocument({ url: "/diary.pdf" }).promise;
+    const input = document.querySelector("input");
+    const canvas = document.querySelector("canvas");
+    document.querySelector("#count").textContent = `of ${pdf.numPages}`;
     input.max = pdf.numPages;
     async function render(number) {
-      document.querySelector('#state').textContent = 'Rendering';
+      document.querySelector("#state").textContent = "Rendering";
       const page = await pdf.getPage(number);
       const viewport = page.getViewport({ scale: 1.25 });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport })
+        .promise;
       const text = await page.getTextContent();
       window.pageItems = text.items;
-      document.querySelector('#pdf-text').textContent = text.items.map((item) => item.str || '').join(' ');
-      document.querySelector('#state').textContent = `Rendered page ${number}`;
+      document.querySelector("#pdf-text").textContent = text.items
+        .map((item) => item.str || "")
+        .join(" ");
+      document.querySelector("#state").textContent = `Rendered page ${number}`;
     }
-    input.addEventListener('change', () => {
+    input.addEventListener("change", () => {
       void render(Number(input.value));
     });
     await render(1);

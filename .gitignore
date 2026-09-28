@@ -1,4 +1,5 @@
 node_modules/
+.DS_Store
 /local/
 /.naita-migrate-*/
 output/
@@ -9,3 +10,5 @@ tmp/
 test-results/
 playwright-report/
 coverage/
+docs/sample-report.pdf
+.tmp-audit

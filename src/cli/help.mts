@@ -63,7 +63,7 @@ the next command; help, agent-guide, and generate --dry-run do not write logs.
 Init/import and normal commands refresh local/CHECKLIST.md and checklist.json.
 Import also prints the checklist. Write notes first; add screenshots last, then
 review/export. Capture ideas are optional, not proof of a screen or test result.
-Report PDF: local/report/output/NAITA-Industrial-Training-Report-Pruthivi-Thejan-draft.pdf.
+Report PDF: local/report/output/NAITA-Industrial-Training-Report-draft.pdf.
 Report generation preserves missing academic and company facts as placeholders
 and reports the remaining inputs in the CLI result.
 `;

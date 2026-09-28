@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { agentContext, agentPrompt } from "../ai/prompt.mts";
@@ -11,19 +11,25 @@ import { checkpoint, readHistory } from "../diary/history.mts";
 import { paths, hasLegacyData, initializeLocal } from "../diary/paths.mts";
 import { diaryStatus, formatStatus } from "../diary/status.mts";
 import {
+  applyAllocation,
+  ensureWeeks,
   loadDiary,
   loadProfile,
   loadState,
-  ensureWeeks,
   selectWeek,
 } from "../diary/store.mts";
 import { prepareDiary, draftWeeks } from "../diary/workflow.mts";
+import { buildTemplateReport } from "../report/template.mts";
 import { parseArgs } from "./args.mts";
+import { companyCommand, formatCompany } from "./company.mts";
 import { generate } from "./export.mts";
 import { HELP } from "./help.mts";
 import { profileCommand } from "./profile.mts";
 import { formatReport, reportCommand } from "./report.mts";
 import { weeklyCommand } from "./weekly.mts";
+
+/** Repository root, used for the paths of tracked artefacts such as the template. */
+const ROOT = path.resolve(import.meta.dirname, "..", "..");
 
 /* oxlint-disable func-style, no-use-before-define, complexity --
    execute and dispatch stay hoisted function declarations because they are
@@ -55,7 +61,9 @@ export async function execute(command, options = {}) {
   }
   try {
     const result = await dispatch(command, workspace, options);
-    const recordsOutput = ["generate", "report"].includes(command);
+    const recordsOutput = ["generate", "report", "report-template"].includes(
+      command
+    );
     const success = { ...details, outcome: "success" };
     if (recordsOutput) {
       success.output = {
@@ -143,6 +151,9 @@ async function dispatch(command, workspace, options) {
   if (command === "init" || command === "profile") {
     return profileCommand(workspace, options, command === "init");
   }
+  if (command === "allocation") {
+    return applyAllocation(workspace);
+  }
   if (command === "weeks") {
     return {
       message: "Week files and screenshot folders are ready.",
@@ -220,9 +231,15 @@ async function dispatch(command, workspace, options) {
     };
   }
   if (
-    ["add", "edit", "accept", "dismiss", "review", "screenshots"].includes(
-      command
-    )
+    [
+      "add",
+      "edit",
+      "accept",
+      "dismiss",
+      "review",
+      "rewrite",
+      "screenshots",
+    ].includes(command)
   ) {
     return weeklyCommand(command, workspace, options);
   }
@@ -231,6 +248,17 @@ async function dispatch(command, workspace, options) {
   }
   if (command === "report") {
     return reportCommand(workspace, options);
+  }
+  if (command === "company") {
+    return companyCommand(workspace, options);
+  }
+  if (command === "report-template") {
+    return buildTemplateReport(
+      path.resolve(
+        options.out || path.join(ROOT, "docs", "final-report-template.pdf")
+      ),
+      { cacheFolder: options.cache, font: options.font, logo: options.logo }
+    );
   }
   throw new Error(`Unknown command: ${command}`);
 }
@@ -245,6 +273,8 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(formatStatus(result));
   } else if (command === "report") {
     console.log(formatReport(result));
+  } else if (command === "company") {
+    console.log(formatCompany(result));
   } else if (command === "checklist") {
     console.log(formatChecklist(result, { markdown: false }));
   } else if (command === "import" && result.checklist) {

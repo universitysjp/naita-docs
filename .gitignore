@@ -12,3 +12,7 @@ playwright-report/
 coverage/
 docs/sample-report.pdf
 .tmp-audit
+
+# Vendored agent skills. Install from skills-lock.json, which pins each
+# source and hash; committing these skews the repository language stats.
+/.agents/skills/

@@ -174,7 +174,7 @@ it("blocks work on leave dates and stale suggestions while preserving saved text
   ).rejects.toThrow(/work date/u);
 });
 
-it("adds daily notes alongside the existing Git description and lets the student edit it", async () => {
+it("starts a daily note from the trainee's own words and lets them edit it", async () => {
   context = fixture();
   seedRepo(context.repo);
   const options = { workspace: context.workspace };
@@ -186,7 +186,13 @@ it("adds daily notes alongside the existing Git description and lets the student
     week: "1",
   });
   const [week] = loadDiary(context.workspace).weeks;
-  expect(week.entry.days["2026-04-06"]).toHaveLength(2);
+  // The day holds only what the trainee wrote. A commit subject is never copied
+  // in as a starting point, because the diary must record the trainee's
+  // account of the work rather than the repository history.
+  expect(week.entry.days["2026-04-06"]).toHaveLength(1);
+  expect(week.entry.days["2026-04-06"][0].text).toBe(
+    "Also reviewed feedback on the search box."
+  );
   await execute("edit", {
     ...options,
     date: "2026-04-06",
@@ -194,9 +200,11 @@ it("adds daily notes alongside the existing Git description and lets the student
     text: "Added a search box to help users find tasks.",
     week: "1",
   });
-  expect(
-    loadDiary(context.workspace).weeks[0].entry.days["2026-04-06"][0].source
-  ).toBe("manual");
+  const [edited] = loadDiary(context.workspace).weeks;
+  expect(edited.entry.days["2026-04-06"][0].text).toBe(
+    "Added a search box to help users find tasks."
+  );
+  expect(edited.entry.days["2026-04-06"][0].source).toBe("manual");
 });
 
 it("fails clearly on malformed manual files and prevents calendar changes from losing weeks", async () => {

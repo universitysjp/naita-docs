@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { dailyPoints, SECTIONS } from "./entries.mts";
+import { SECTIONS } from "./entries.mts";
 import { PROFILE_FIELDS, REQUIRED_FIELDS } from "./profile.mts";
 import { scanScreenshots } from "./screenshots.mts";
 
@@ -52,8 +52,11 @@ export const diaryStatus = async (diary) => {
         (key) => sections[key] === 0
       );
       const workDays = week.days.filter((day) => day.status === "work");
+      // A work day is filled when the trainee wrote a note for it. The PDF shows
+      // fixed wording for an unwritten day, so the saved points are what decides
+      // whether the day is actually done.
       const missingDays = workDays
-        .filter((day) => !dailyPoints(day, week.entry).length)
+        .filter((day) => !week.entry.days[day.date].length)
         .map((day) => day.date);
       const imagesDone =
         !screenshots.errors.length &&

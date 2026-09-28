@@ -168,6 +168,13 @@ export const describeCommit = (subject) => {
     : text.charAt(0).toUpperCase() + text.slice(1);
   return /[.!?]$/u.test(result) ? result : `${result}.`;
 };
+// Git subjects are never printed in the diary. A day with no written note means
+// the trainee was still on the week's task, which is a normal day, and this is
+// the wording the PDF shows for it. Status reports the day so the student can
+// replace it with their own sentence.
+export const CONTINUED_WORK_TEXT =
+  "Carried on with the task that was already in progress.";
+
 export const dailyPoints = (day, entry) => {
   if (day.status === "outside") {
     return [];
@@ -187,14 +194,12 @@ export const dailyPoints = (day, entry) => {
   if (manual.length) {
     return manual;
   }
-  return [
-    ...new Map(
-      day.commits.map((commit) => [
-        commit.subject,
-        { text: describeCommit(commit.subject) },
-      ])
-    ).values(),
-  ];
+  // A work day with no note of the student's own is still a working day, and it
+  // says so. The text is fixed and mentions nothing about the repository, so a
+  // commit subject can never reach the PDF. The student's own wording is used
+  // whenever they have written any, and status reports the days that still need
+  // a sentence.
+  return [{ text: CONTINUED_WORK_TEXT }];
 };
 export const editPoint = (
   entry,

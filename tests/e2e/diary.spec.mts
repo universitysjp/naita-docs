@@ -100,6 +100,15 @@ test("CLI-to-PDF workflow: two weeks, reviewed points, manual edits, PNG/JPEG sc
         week: number,
       });
     }
+    // Daily notes are written in the trainee's own words, never taken from the
+    // commit subjects, so every working day needs its own entry.
+    for (const day of week.days.filter((item) => item.status === "work")) {
+      cli(workspace, "add", {
+        date: day.date,
+        text: `Worked on the task list for week ${number} on ${day.date}.`,
+        week: number,
+      });
+    }
     // This is an explicitly labelled test fixture, not evidence of real internship work.
     // oxlint-disable-next-line no-await-in-loop
     await page.setContent(

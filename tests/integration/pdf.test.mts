@@ -6,7 +6,11 @@ import { PDFDocument, PDFName } from "pdf-lib";
 import { afterEach, expect, it } from "vitest";
 
 import { execute } from "../../src/cli/main.mts";
-import { point, SECTIONS } from "../../src/diary/entries.mts";
+import {
+  CONTINUED_WORK_TEXT,
+  point,
+  SECTIONS,
+} from "../../src/diary/entries.mts";
 import { loadDiary, saveWeek } from "../../src/diary/store.mts";
 import { renderDiary, TEMPLATE_PATH } from "../../src/pdf/render.mts";
 import {
@@ -40,6 +44,12 @@ it("fills the supplied PDF with weekly bullets and images, while preserving temp
       week.entry.sections[section].push(
         point(`Week ${week.number} ${section} example.`)
       );
+    }
+    // Daily cells come from the trainee's own notes, never from Git subjects.
+    for (const day of week.days) {
+      if (day.status === "work") {
+        week.entry.days[day.date].push(point("Added a search box."));
+      }
     }
     screenshot(week.screenshotFolder);
     week.entry.screenshots.captions["01-task-list.png"] =
@@ -164,4 +174,60 @@ it("refuses source overwrites, corrupt images, missing fonts, and incomplete str
     execute("generate", { ...options, out, strict: true })
   ).rejects.toThrow(/not ready/u);
   expect(existsSync(out)).toBe(false);
+});
+
+it("never prints a commit subject in the daily grid", async () => {
+  context = fixture();
+  seedRepo(context.repo);
+  const out = path.join(context.root, "no-commits.pdf");
+  // A week with no written notes at all: every work day falls back to the
+  // fixed wording, so no commit subject can appear on the exported page.
+  await execute("import", {
+    leave: "",
+    medical: "",
+    repo: context.repo,
+    workspace: context.workspace,
+  });
+  const diary = loadDiary(context.workspace);
+  for (const section of Object.keys(SECTIONS)) {
+    for (const week of diary.weeks) {
+      week.entry.sections[section].push(
+        point(`Week ${week.number} ${section} example.`)
+      );
+      saveWeek(context.workspace, week);
+    }
+  }
+  await execute("generate", { out, workspace: context.workspace });
+  const noNotes = await pdfPages(out);
+  const grid = noNotes[2].text;
+  expect(grid).toContain(CONTINUED_WORK_TEXT);
+  // The seeded repo subjects, and the words they would become if reused.
+  for (const subject of ["search", "empty results", "filtering", "task list"]) {
+    expect(grid.toLowerCase(), `grid leaked ${subject}`).not.toContain(subject);
+  }
+  // The trainee's own wording still shows once they write some.
+  const [week] = loadDiary(context.workspace).weeks;
+  week.entry.days[week.days[0].date] = [
+    point("Wrote the empty-search case into the filter."),
+  ];
+  saveWeek(context.workspace, week);
+  await execute("generate", {
+    out: path.join(context.root, "with-notes.pdf"),
+    workspace: context.workspace,
+  });
+  const writtenPages = await pdfPages(
+    path.join(context.root, "with-notes.pdf")
+  );
+  const [written] = writtenPages.slice(2);
+  expect(written.text).toContain(
+    "Wrote the empty-search case into the filter."
+  );
+  // Only the day the trainee wrote for uses their wording. The other work days
+  // in the same week still show the fallback, because no note was saved for
+  // them, which is the point of keeping the two apart.
+  const monday = week.days[0].date.split("-").toReversed().join("/");
+  const mondayLine =
+    written.text.split(monday)[1]?.split(/\d{2}\/\d{2}\/\d{4}/u)[0] ?? "";
+  expect(mondayLine).toContain("Wrote the empty-search case into the filter.");
+  expect(written.text).toContain(CONTINUED_WORK_TEXT);
 });

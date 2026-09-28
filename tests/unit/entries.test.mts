@@ -10,10 +10,11 @@ import { parseArgs } from "../../src/cli/args.mts";
 import { calendar } from "../../src/diary/dates.mts";
 import {
   blankWeek,
+  cleanText,
+  CONTINUED_WORK_TEXT,
+  dailyPoints,
   describeCommit,
   editPoint,
-  dailyPoints,
-  cleanText,
 } from "../../src/diary/entries.mts";
 import { PROFILE } from "../helpers/fixtures.mts";
 
@@ -79,9 +80,26 @@ describe("weekly points and suggestions", () => {
   });
   it("does not use work text on medical dates or fabricate missing work", () => {
     const week = sample();
-    expect(dailyPoints(week.days[1], week.entry)).toEqual([]);
+    // A work day with no note of the trainee's own shows fixed wording, never a
+    // commit subject. Days[1] has no commits, so there is nothing it could
+    // leak even if the fallback reached for evidence.
+    expect(dailyPoints(week.days[1], week.entry)).toEqual([
+      { text: CONTINUED_WORK_TEXT },
+    ]);
+    expect(dailyPoints(week.days[0], week.entry)).toEqual([
+      { text: CONTINUED_WORK_TEXT },
+    ]);
+    expect(dailyPoints(week.days[0], week.entry)[0].text).not.toMatch(
+      /search/iu
+    );
+    // The trainee's own wording is used whenever they have written some.
+    week.entry.days[week.days[0].date] = [
+      { id: "a", source: "manual", text: "Built the task list screen." },
+    ];
+    expect(dailyPoints(week.days[0], week.entry)).toEqual([
+      { id: "a", source: "manual", text: "Built the task list screen." },
+    ]);
     const day = { ...week.days[0], status: "medical" };
-    week.entry.days[day.date] = [{ text: "Some work" }];
     expect(dailyPoints(day, week.entry)).toEqual([{ text: "Medical leave." }]);
   });
   it("validates the whole agent response before applying suggestions", () => {

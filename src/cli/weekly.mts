@@ -1,16 +1,97 @@
 import path from "node:path";
 
 import { resolveSuggestion } from "../ai/suggestions.mts";
-import { editPoint, dailyPoints, point } from "../diary/entries.mts";
+import { editPoint, point, SECTIONS } from "../diary/entries.mts";
+import { readJson } from "../diary/files.mts";
 import { scanScreenshots } from "../diary/screenshots.mts";
 import { diaryStatus } from "../diary/status.mts";
 import { ensureWeeks, selectWeek, saveWeek } from "../diary/store.mts";
 
-// The loop dispatches the weekly sub-commands (add, edit, accept, dismiss,
-// review). A flat switch would hold the same branches, so the complexity is
-// inherent to the command set rather than a nesting problem.
+// Draft points are objects so evidence hashes can travel with the wording.
+const textList = (value, label) => {
+  if (!Array.isArray(value) || !value.length) {
+    throw new Error(`${label} needs at least one point.`);
+  }
+  return value.map((item) => {
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- validating an untyped draft file at its I/O boundary
+    if (!item || typeof item.text !== "string") {
+      throw new TypeError(
+        `${label} needs points shaped as { "text": "..." }, optionally with evidence.`
+      );
+    }
+    return point(item.text, "manual", item.evidence ?? []);
+  });
+};
+export const parseRewriteDraft = (raw) => {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- validating an untyped draft file at its I/O boundary
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("The rewrite file must be a JSON object.");
+  }
+  const sections = {};
+  for (const key of Object.keys(SECTIONS)) {
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- validating an untyped draft file at its I/O boundary
+    if (typeof raw.sections?.[key] !== "object") {
+      throw new TypeError(`The rewrite file needs at least one ${key} point.`);
+    }
+    sections[key] = textList(raw.sections[key], key);
+  }
+  const days = {};
+  for (const [date, texts] of Object.entries(raw.days ?? {})) {
+    days[date] = textList(texts, date);
+  }
+  return { days, sections, week: raw.week };
+};
+// Rewriting a whole week is a deliberate correction of earlier wording, not the
+// way to make a small change. The saved history keeps every replaced point.
+export const rewriteWeek = (workspace, options) => {
+  if (!options.from) {
+    throw new Error("rewrite requires --from FILE with the full week wording.");
+  }
+  if (!options.reason) {
+    throw new Error(
+      "rewrite requires --reason TEXT explaining the correction."
+    );
+  }
+  const draft = parseRewriteDraft(readJson(path.resolve(options.from)));
+  const diary = ensureWeeks(workspace);
+  const week = selectWeek(diary, options.week ?? draft.week);
+  for (const key of Object.keys(SECTIONS)) {
+    week.entry.sections[key].splice(
+      0,
+      week.entry.sections[key].length,
+      ...draft.sections[key]
+    );
+  }
+  for (const [date, texts] of Object.entries(draft.days)) {
+    if (!week.entry.days[date]) {
+      throw new Error(`${date} is not in week ${week.number}.`);
+    }
+    week.entry.days[date].splice(0, week.entry.days[date].length, ...texts);
+  }
+  // A day without a written note is not a day without work, but the week is not
+  // finished either, so require the missing days to be listed explicitly.
+  const unfilled = week.days
+    .filter((day) => day.status === "work")
+    .filter((day) => !week.entry.days[day.date].length)
+    .map((day) => day.date);
+  if (unfilled.length) {
+    throw new Error(
+      `Week ${week.number} still has no work note for ${unfilled.join(", ")}. Add those days to the rewrite file.`
+    );
+  }
+  week.entry.reviewedFingerprint = null;
+  saveWeek(workspace, week);
+  return {
+    file: week.file,
+    message: `Rewrote week ${week.number} from ${path.basename(path.resolve(options.from))}. The week needs a new review.`,
+    week: week.entry,
+  };
+};
 // oxlint-disable-next-line complexity -- inherent command dispatch
 export const weeklyCommand = async (command, workspace, options) => {
+  if (command === "rewrite") {
+    return rewriteWeek(workspace, options);
+  }
   const diary = ensureWeeks(workspace);
   const week = selectWeek(diary, options.week);
   if (command === "add" || command === "edit") {
@@ -25,9 +106,9 @@ export const weeklyCommand = async (command, workspace, options) => {
         );
       }
       if (command === "add" && !week.entry.days[day.date].length) {
-        week.entry.days[day.date] = dailyPoints(day, week.entry).map((value) =>
-          point(value.text, "git")
-        );
+        // Start a day with just the trainee's own note. An empty day is not a
+        // problem to patch over with text taken from a commit.
+        week.entry.days[day.date] = [];
       }
     }
     editPoint(week.entry, options);

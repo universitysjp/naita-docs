@@ -1,12 +1,18 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import path from "node:path";
 
 import { validateAbsence } from "./attendance.mts";
-import { calendar } from "./dates.mts";
+import {
+  addMonths,
+  allocatedMonthCount,
+  allocationEnd,
+  calendar,
+  validDate,
+} from "./dates.mts";
 import { blankWeek, validateWeek } from "./entries.mts";
 import { readJson, writeJson } from "./files.mts";
 import { initializeLocal, paths, readPaths } from "./paths.mts";
-import { validateProfile } from "./profile.mts";
+import { checkAllocation, validateProfile } from "./profile.mts";
 
 export { readJson, writeJson } from "./files.mts";
 export { paths } from "./paths.mts";
@@ -16,6 +22,7 @@ export const loadProfile = (workspace) =>
   readJson(readPaths(workspace).profile, {});
 export const saveProfile = (workspace, config) => {
   validateProfile(config, { partial: true });
+  checkAllocation(config);
   initializeLocal(workspace);
   const location = paths(workspace);
   const state = readJson(location.state, {});
@@ -65,6 +72,9 @@ export const loadDiary = (workspace) => {
   const location = readPaths(workspace);
   const config = validateProfile(loadProfile(workspace), { partial: true });
   const state = loadState(workspace);
+  // Reading stays tolerant of a period longer than the allocation, so `allocation`
+  // can repair a profile saved before the six-month rule existed. Saving is
+  // where the rule is enforced.
   validateAbsence(state.absence, config);
   if (
     state.period &&
@@ -90,14 +100,36 @@ export const loadDiary = (workspace) => {
   // Catch edited dates and orphaned files instead of silently excluding them.
   if (existsSync(location.weeks)) {
     const expected = new Set(weeks.map((week) => `${weekKey(week)}.json`));
+    // Weeks past the NAITA allocation belong to a later extension or a permanent
+    // post. Move them aside instead of failing, so the diary only covers the
+    // six funded months and the extra material stays recoverable.
+    const archive = path.join(
+      location.local,
+      "archive",
+      "beyond-training-allocation"
+    );
     for (const file of readdirSync(location.weeks).filter((name) =>
       name.endsWith(".json")
     )) {
-      if (!expected.has(file)) {
-        throw new Error(
-          `Unexpected week file ${file}. Restore the training dates or move this file to an archive.`
-        );
+      if (expected.has(file)) {
+        continue;
       }
+      const monday = file.slice("week-XX-".length, "week-XX-".length + 10);
+      if (
+        validDate(monday) &&
+        monday > allocationEnd(config.trainingStart, config.trainingEnd, config)
+      ) {
+        mkdirSync(archive, { recursive: true });
+        renameSync(path.join(location.weeks, file), path.join(archive, file));
+        const folder = path.join(location.screenshots, file.slice(0, -5));
+        if (existsSync(folder)) {
+          renameSync(folder, path.join(archive, path.basename(folder)));
+        }
+        continue;
+      }
+      throw new Error(
+        `Unexpected week file ${file}. Restore the training dates or move this file to an archive.`
+      );
     }
   }
   return { config, state, weeks };
@@ -137,4 +169,69 @@ export const selectWeek = (diary, selector) => {
 export const saveWeek = (workspace, week) => {
   validateWeek(week.entry, week);
   writeJson(weekPath(workspace, week), week.entry);
+};
+
+// NAITA funds six months. When a profile runs longer, the extra weeks are a
+// later extension or a permanent post: shorten the recorded period and move the
+// surplus weeks, screenshots, absence dates, and period to the archive.
+export const applyAllocation = (workspace) => {
+  const location = readPaths(workspace);
+  const config = readJson(location.profile, {});
+  if (!config.trainingStart) {
+    throw new Error(
+      "Set --field trainingStart before applying the allocation."
+    );
+  }
+  const months = allocatedMonthCount(config);
+  const end = addMonths(config.trainingStart, months);
+  if (config.trainingEnd && config.trainingEnd <= end) {
+    return {
+      alreadyAllocated: true,
+      archivedWeeks: [],
+      config,
+      end,
+      message: `The diary already stops at ${end}, the ${months}-month NAITA allocation.`,
+    };
+  }
+  const state = loadState(workspace);
+  const archive = path.join(
+    location.local,
+    "archive",
+    "beyond-training-allocation"
+  );
+  const archivedWeeks = [];
+  if (existsSync(location.weeks)) {
+    for (const file of readdirSync(location.weeks)
+      .filter((name) => name.endsWith(".json"))
+      .toSorted()) {
+      const monday = file.slice("week-XX-".length, "week-XX-".length + 10);
+      if (!validDate(monday) || monday <= end) {
+        continue;
+      }
+      mkdirSync(archive, { recursive: true });
+      renameSync(path.join(location.weeks, file), path.join(archive, file));
+      const folder = path.join(location.screenshots, file.slice(0, -5));
+      if (existsSync(folder)) {
+        renameSync(folder, path.join(archive, path.basename(folder)));
+      }
+      archivedWeeks.push(file);
+    }
+  }
+  for (const key of ["leave", "medical", "off"]) {
+    state.absence[key] = (state.absence[key] || []).filter(
+      (date) => date <= end
+    );
+  }
+  if (state.period) {
+    state.period.end = end;
+  }
+  writeJson(location.profile, { ...config, trainingEnd: end });
+  saveState(workspace, state);
+  return {
+    alreadyAllocated: false,
+    archivedWeeks,
+    config: { ...config, trainingEnd: end },
+    end,
+    message: `Training period now ends ${end}, the ${months}-month NAITA allocation. ${archivedWeeks.length} later week(s) moved to ${archive}. Work after ${end} is a later extension or permanent post and stays out of the NAITA diary.`,
+  };
 };

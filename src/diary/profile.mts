@@ -1,4 +1,8 @@
-import { validatePeriod } from "./dates.mts";
+import {
+  allocatedMonthCount,
+  allocationEnd,
+  validatePeriod,
+} from "./dates.mts";
 
 // Key order is the order the TUI and CLI present the fields, so it is fixed.
 // oxlint-disable-next-line sort-keys
@@ -21,6 +25,31 @@ export const REQUIRED_FIELDS = [
   "trainingStart",
   "trainingEnd",
 ];
+// NAITA funds six months. A longer period means the training was extended or
+// turned into a permanent post, which is not part of the NAITA diary. Reading
+// stays tolerant so `allocation` can repair a profile saved before this rule
+// existed; saving a longer period is refused.
+export const checkAllocation = (config) => {
+  const months = allocatedMonthCount(config);
+  if (!Number.isInteger(months) || months < 1 || months > 24) {
+    throw new Error("allocatedMonths must be a whole number from 1 to 24.");
+  }
+  if (!config.trainingStart || !config.trainingEnd) {
+    return config;
+  }
+  const allocated = allocationEnd(
+    config.trainingStart,
+    config.trainingEnd,
+    config
+  );
+  if (config.trainingEnd > allocated) {
+    throw new Error(
+      `NAITA allocates ${months} months of industrial training, so training end must be ${allocated} or earlier. Run allocation to close the diary at ${allocated}, or set --field trainingEnd --text ${allocated}.`
+    );
+  }
+  return config;
+};
+
 export const validateProfile = (config, { partial = false } = {}) => {
   // oxlint-disable-next-line anti-slop/no-runtime-typeof -- reading untyped profile JSON at its I/O boundary
   if (!config || typeof config !== "object" || Array.isArray(config)) {
@@ -43,6 +72,9 @@ export const validateProfile = (config, { partial = false } = {}) => {
   }
   if (config.trainingStart && config.trainingEnd) {
     validatePeriod(config.trainingStart, config.trainingEnd);
+  }
+  if (!partial) {
+    checkAllocation(config);
   }
   if (
     config.workingDays !== undefined &&

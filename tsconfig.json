@@ -8,7 +8,8 @@
     "noCheck": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "strictNullChecks": true
   },
   "include": ["src/**/*", "tests/tui/**/*"]
 }

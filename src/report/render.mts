@@ -128,6 +128,10 @@ const drawCover = async (pdf, fonts, document, logo) => {
     );
     cursor -= 22;
   }
+  // A field the workspace cannot supply still gets its row, marked as not
+  // recorded. Dropping the row instead would leave a cover that looks finished
+  // while silently omitting an identity field a supervisor checks for.
+  const NOT_RECORDED = "[NOT RECORDED]";
   const rows = [
     ["Name", cover.name],
     ["Student No", cover.studentNumber],
@@ -136,7 +140,7 @@ const drawCover = async (pdf, fonts, document, logo) => {
     ["Category", cover.category],
     ["NAITA Reg. No", cover.naitaRegistration],
     ["Training Period", `${cover.trainingStart} to ${cover.trainingEnd}`],
-  ].filter(([, value]) => value);
+  ].map(([label, value]) => [label, value || NOT_RECORDED]);
   let y = cursor - 22;
   for (const [label, value] of rows) {
     drawText(page, label, 104, y, 12, fonts.bold);
@@ -146,9 +150,23 @@ const drawCover = async (pdf, fonts, document, logo) => {
   }
 };
 
-const drawProsePage = (pdf, fonts, title, paragraphs) => {
+/**
+ * A front matter section is a titled page, so an unwritten one still gets its
+ * page. It never prints as a bare heading on an otherwise empty sheet: the gap
+ * is stated as a question the student answers, which is what the report is for.
+ */
+const drawProsePage = (pdf, fonts, title, paragraphs, question) => {
   let page = addBlankPage(pdf);
   centerText(page, fonts, title, PAGE.height - 84, 15, fonts.bold);
+  if (!paragraphs.length) {
+    const body = question || "Not written yet.";
+    let y = PAGE.height - 126;
+    for (const line of wrap(body, fonts.regular, 12, CONTENT)) {
+      drawText(page, line, PAGE.marginLeft, y, 12, fonts.regular);
+      y -= LEADING;
+    }
+    return;
+  }
   let y = PAGE.height - 126;
   for (const paragraph of paragraphs) {
     const lines = wrap(printable(paragraph), fonts.regular, 12, CONTENT);
@@ -548,10 +566,22 @@ const buildFrontMatter = async (document, options, body, shift) => {
   ];
   for (const kind of order) {
     if (kind === "acknowledgement" && document.acknowledgement) {
-      drawProsePage(pdf, fonts, "ACKNOWLEDGEMENT", document.acknowledgement);
+      drawProsePage(
+        pdf,
+        fonts,
+        "ACKNOWLEDGEMENT",
+        document.acknowledgement,
+        "Not written yet. Acknowledge the authority, the department, the establishment's management, the supervisor, and the people who helped, in that order."
+      );
     }
     if (kind === "preface" && document.preface) {
-      drawProsePage(pdf, fonts, "PREFACE", document.preface);
+      drawProsePage(
+        pdf,
+        fonts,
+        "PREFACE",
+        document.preface,
+        "Not written yet. State what the placement is for, which department requirement it satisfies, the dates, and how the three chapters are arranged."
+      );
     }
     if (kind === "tableOfContents") {
       drawEntryList(pdf, fonts, "TABLE OF CONTENTS", entries, anchors);

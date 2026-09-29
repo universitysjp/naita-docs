@@ -11,6 +11,24 @@ import { renderReportDocument } from "../report/render.mts";
 const DEFAULT_NAME = "NAITA-Industrial-Training-Report-draft.pdf";
 
 /**
+ * The cover logo is the one image the report takes from a fixed place rather
+ * than from a path the student names. The convention is a file called `logo` at
+ * the top of the report folder, so any student can supply one without editing
+ * code; several common extensions are tried because a logo is usually a PNG or
+ * a JPEG. An explicit `--logo` always wins, and no logo at all is fine.
+ */
+const LOGO_NAMES = ["logo.png", "logo.jpg", "logo.jpeg"];
+const findLogo = (reportRoot) => {
+  for (const name of LOGO_NAMES) {
+    const file = path.join(reportRoot, name);
+    if (existsSync(file)) {
+      return file;
+    }
+  }
+  return null;
+};
+
+/**
  * Reports only what the workspace cannot supply yet, so the list shortens as
  * the student fills the profile and supplies the prose the renderer draws.
  */
@@ -42,11 +60,20 @@ const reportInputs = (missing) => {
       `Section text still marked as a placeholder: ${missing.sections.placeholder.join(", ")}`
     );
   }
-  if (missing.assets.pending) {
-    items.push("Asset permissions or redaction checks still pending");
+  if (missing.repositoryLanguage.length) {
+    items.push(
+      `${missing.repositoryLanguage.length} diary point(s) still use repository language and were left out of the report`
+    );
   }
-  if (!missing.formatRules) {
-    items.push("Official submission and formatting rules");
+  if (missing.assets.unreadable) {
+    items.push(
+      `The asset register could not be read (${missing.assets.unreadable}), so its permission and redaction checks were not applied.`
+    );
+  }
+  if (missing.assets.pending) {
+    items.push(
+      `${missing.assets.pending} asset(s) in the register still have a permission or redaction check outstanding.`
+    );
   }
   return items;
 };
@@ -76,19 +103,35 @@ const pendingContentSections = (document) => {
   return pending;
 };
 
-/** Asset register entries whose permission or redaction check is outstanding. */
+/**
+ * Asset register entries whose permission or redaction check is outstanding.
+ *
+ * The register is written by hand under `assets/`, so a broken or half-finished
+ * file is expected rather than exceptional. It is read for the report's own
+ * status line only, so an unreadable register reports the gap instead of
+ * stopping the whole report.
+ */
 const pendingAssets = (reportRoot) => {
   const file = path.join(reportRoot, "assets", "register.json");
   if (!existsSync(file)) {
-    return 0;
+    return { pending: 0, unreadable: null };
   }
-  const register = JSON.parse(readFileSync(file, "utf-8"));
-  return (register.assets || []).filter(
-    (asset) =>
-      asset.permissionStatus !== "approved" ||
-      (asset.redactionStatus !== "not-applicable" &&
-        asset.redactionStatus !== "checked")
-  ).length;
+  let register;
+  try {
+    register = JSON.parse(readFileSync(file, "utf-8"));
+  } catch (error) {
+    return { pending: 0, unreadable: error.message };
+  }
+  const assets = Array.isArray(register?.assets) ? register.assets : [];
+  return {
+    pending: assets.filter(
+      (asset) =>
+        asset?.permissionStatus !== "approved" ||
+        (asset?.redactionStatus !== "not-applicable" &&
+          asset?.redactionStatus !== "checked")
+    ).length,
+    unreadable: null,
+  };
 };
 
 export const reportCommand = async (workspace, options = {}) => {
@@ -99,17 +142,20 @@ export const reportCommand = async (workspace, options = {}) => {
     options.out || path.join(reportRoot, "output", DEFAULT_NAME)
   );
   const company = loadCompany(workspace);
-  const { document, warnings } = await buildReportFromDiary(diary, {
-    abbreviations: options.abbreviations,
-    acknowledgement: options.acknowledgement,
-    company,
-    preface: options.preface,
-    references: options.references,
-    reportRoot,
-  });
+  const { document, repositoryLanguage, warnings } = await buildReportFromDiary(
+    diary,
+    {
+      abbreviations: options.abbreviations,
+      acknowledgement: options.acknowledgement,
+      company,
+      preface: options.preface,
+      references: options.references,
+      reportRoot,
+    }
+  );
   const result = await renderReportDocument(document, output, {
     font: options.font,
-    logo: options.logo || path.join(reportRoot, "usjp.jpg"),
+    logo: options.logo || findLogo(reportRoot) || undefined,
   });
   const incompleteWeeks = status.weeks
     .filter((week) => !week.complete)
@@ -126,7 +172,6 @@ export const reportCommand = async (workspace, options = {}) => {
     absencesConfirmed: status.absencesConfirmed,
     assets: pendingAssets(reportRoot),
     companyResearch: Object.keys(company.record || {}).length,
-    formatRules: false,
     incompleteWeeks,
     profile: status.profile.missing,
     prose: {
@@ -143,6 +188,7 @@ export const reportCommand = async (workspace, options = {}) => {
     },
     supervisor: Boolean(diary.config.supervisor),
   };
+  missing.repositoryLanguage = repositoryLanguage;
   missing.reportInputs = reportInputs(missing);
   const missingCount =
     missing.profile.length +
@@ -155,7 +201,7 @@ export const reportCommand = async (workspace, options = {}) => {
     complete: status.complete && missingCount === 0,
     message: `Created report ${result.path} (${result.pages} pages, ${result.figures} figures, ${result.tables} tables). ${missingCount} input/checklist areas still need review.`,
     missing,
-    warnings,
+    warnings: [...warnings, ...repositoryLanguage],
   };
 };
 

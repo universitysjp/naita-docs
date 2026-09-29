@@ -13,7 +13,11 @@ import { afterEach, expect, it } from "vitest";
 
 import { fetchImages, imageSize } from "../../src/report/assets.mts";
 import { sanitizeFindings } from "../../src/report/company.mts";
-import { groupWorkStreams } from "../../src/report/from-diary.mts";
+import {
+  groupWorkStreams,
+  loadStreams as readStreams,
+  scrubRepositoryLanguage,
+} from "../../src/report/from-diary.mts";
 import { renderReportDocument } from "../../src/report/render.mts";
 import {
   buildTemplateDocument,
@@ -402,8 +406,10 @@ it("groups diary work into streams and keeps unrecognised points", () => {
           problems: [],
           solutions: [],
           work: [
-            { text: "Added a search box to the task list." },
-            { text: "Fixed the document export footer." },
+            { text: "Built a data export screen for the reporting team." },
+            {
+              text: "Fixed the release checklist that was failing on staging.",
+            },
             { text: "Typed up the notes from the week and cleared the inbox." },
           ],
         },
@@ -417,7 +423,9 @@ it("groups diary work into streams and keeps unrecognised points", () => {
           learning: [],
           problems: [],
           solutions: [],
-          work: [{ text: "Rebuilt the recruitment pipeline board." }],
+          work: [
+            { text: "Set up the reporting database and its test fixtures." },
+          ],
         },
       },
       number: 2,
@@ -425,9 +433,10 @@ it("groups diary work into streams and keeps unrecognised points", () => {
   ];
   const streams = groupWorkStreams(weeks);
   const titles = streams.map((stream) => stream.title);
-  expect(titles).toContain("Interface and Design System");
-  expect(titles).toContain("Document Workflows");
-  expect(titles).toContain("Recruitment Workflows");
+  // The built-in streams describe the kind of activity, not one placement's
+  // product, so no stream name can be wrong for another student.
+  expect(titles).toContain("Building the Work");
+  expect(titles).toContain("Testing, Quality, and Release");
   expect(titles).toContain("Other Recorded Work");
   // No accepted point is dropped, whichever stream it lands in.
   const kept = streams.flatMap((stream) => stream.points);
@@ -435,6 +444,66 @@ it("groups diary work into streams and keeps unrecognised points", () => {
   expect(
     streams.find((stream) => stream.title === "Other Recorded Work").points[0]
   ).toBe("Typed up the notes from the week and cleared the inbox.");
+});
+
+it("removes repository language and a file path from a report point", () => {
+  // A whole sentence of repository language cannot be printed at all.
+  expect(
+    scrubRepositoryLanguage("Updated src/services/vacancy.ts and pushed a PR.")
+  ).toEqual({
+    removed: ["Updated src/services/vacancy.ts and pushed a PR."],
+    text: "",
+  });
+  // A point that also records a real outcome keeps the outcome.
+  const mixed = scrubRepositoryLanguage(
+    "Added a filter so a user can narrow the list. Merged the change on the develop branch."
+  );
+  expect(mixed.text).toBe("Added a filter so a user can narrow the list.");
+  expect(mixed.removed).toHaveLength(1);
+  // A commit hash is repository language too.
+  expect(
+    scrubRepositoryLanguage("Fixed the failure seen in 4f2a91c.").text
+  ).toBe("");
+  // Ordinary work wording is left exactly as written.
+  const plain = "Added a filter so a user can narrow the list.";
+  expect(scrubRepositoryLanguage(plain).text).toBe(plain);
+});
+
+it("uses a student-supplied work stream list when one is saved", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "naita-streams-"));
+  mkdirSync(path.join(root, "content"), { recursive: true });
+  writeFileSync(
+    path.join(root, "content", "work-streams.json"),
+    JSON.stringify({
+      streams: [
+        { anchors: ["harvest", "crop"], id: "field", title: "Field Work" },
+        { id: "broken", title: "No anchors here" },
+      ],
+    })
+  );
+  const weeks = [
+    {
+      entry: {
+        sections: {
+          improvements: [],
+          learning: [],
+          problems: [],
+          solutions: [],
+          work: [{ text: "Recorded the crop yield for each harvest block." }],
+        },
+      },
+      number: 1,
+    },
+  ];
+  const streams = groupWorkStreams(weeks, readStreams(root));
+  expect(streams.map((stream) => stream.title)).toEqual(["Field Work"]);
+  // A missing or unreadable list falls back to the generic one.
+  expect(readStreams(path.join(root, "nowhere"))).toEqual(
+    readStreams(mkdtempSync(path.join(tmpdir(), "naita-streams-")))
+  );
+  writeFileSync(path.join(root, "content", "work-streams.json"), "{ not json");
+  expect(readStreams(root).length).toBeGreaterThan(0);
+  rmSync(root, { force: true, recursive: true });
 });
 
 it("keeps only company findings that carry a public source", () => {

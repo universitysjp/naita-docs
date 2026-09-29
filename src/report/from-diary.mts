@@ -379,7 +379,7 @@ const teamTree = (config) => {
               {
                 children: [],
                 label: "Team members",
-                role: "Software engineers, including the trainee",
+                role: "Software engineers, including me",
               },
             ],
             label: "Team lead",
@@ -466,7 +466,7 @@ const buildChapters = ({
   {
     blocks: [
       ...paragraphs([
-        "This chapter introduces the training establishment, its business, its organisation, and the working practices that shaped the placement. It is written so that the work described in the next chapter can be read in context, and every fact in it is either from a public source recorded with its address, or something the trainee could observe directly during the placement.",
+        "This chapter introduces the training establishment, its business, its organisation, and the working practices that shaped the placement. It is written so that the work described in the next chapter can be read in context, and every fact in it is either from a public source recorded with its address, or something I was able to see for myself during the placement.",
       ]),
       ...(hasResearch(company) ? [] : [missingResearch()]),
     ],
@@ -489,7 +489,7 @@ const buildChapters = ({
             : [
                 {
                   kind: "callout",
-                  text: "The trainee's private address, telephone, category, institute registration, NAITA registration, and training location are not part of the diary profile. Ask the student for them rather than guessing.",
+                  text: "The address, telephone, category, institute registration, NAITA registration, and training location are not part of the diary profile yet. Ask for them rather than guessing.",
                   title: "Profile fields still blank",
                 },
               ]),
@@ -679,7 +679,7 @@ const buildChapters = ({
         blocks: [
           {
             kind: "paragraph",
-            text: "This assessment is of the trainee's own position at the end of the placement. It is written to be useful rather than flattering, because an assessment that claims no weaknesses cannot be acted on. The trainee should rewrite each list in their own words.",
+            text: "This is my own assessment of where I had reached by the end of the placement. I have written it to be useful rather than flattering, because an assessment that claims no weaknesses cannot be acted on.",
           },
         ],
         children: [

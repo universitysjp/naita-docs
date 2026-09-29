@@ -7,6 +7,64 @@ import { prepareDiary, draftWeeks } from "../diary/workflow.mts";
 import { renderDiary } from "../pdf/render.mts";
 import { ask } from "./profile.mts";
 
+/**
+ * A strict refusal that lists every gap. Telling the student only that the diary
+ * is not ready sends them back to `status` to find out why, so the same gaps are
+ * named here, in full, and nothing is summarised away.
+ */
+const strictGaps = (status) => {
+  const gaps = [];
+  for (const key of status.profile.requiredMissing) {
+    gaps.push(`Profile field "${key}" is required and still blank.`);
+  }
+  if (!status.absencesConfirmed) {
+    gaps.push(
+      "Leave and medical dates are not confirmed. Pass --leave and --medical, using an empty string for none."
+    );
+  }
+  if (!status.gitImported) {
+    gaps.push(
+      "No Git evidence has been imported (run import), and no manual note has been accepted."
+    );
+  }
+  const incomplete = status.weeks.filter((week) => !week.complete);
+  for (const week of incomplete) {
+    const reasons = [];
+    if (week.missing.length) {
+      reasons.push(`empty sections: ${week.missing.join(", ")}`);
+    }
+    if (week.missingDays.length) {
+      reasons.push(`work days with no note: ${week.missingDays.join(", ")}`);
+    }
+    if (
+      !week.screenshots.images.length &&
+      !week.screenshots.notRequiredReason
+    ) {
+      reasons.push("no screenshot and no not-required reason");
+    }
+    if (week.screenshots.errors.length) {
+      reasons.push(
+        `invalid screenshots: ${week.screenshots.errors.join("; ")}`
+      );
+    }
+    if (week.suggestions) {
+      reasons.push(`${week.suggestions} pending suggestion(s)`);
+    }
+    if (week.conflicts.length) {
+      reasons.push(
+        `work recorded on non-working dates: ${week.conflicts.join(", ")}`
+      );
+    }
+    if (!week.reviewed) {
+      reasons.push("review is out of date");
+    }
+    gaps.push(
+      `Week ${week.number} (${week.monday} to ${week.sunday}) is incomplete: ${reasons.join("; ")}.`
+    );
+  }
+  return gaps;
+};
+
 export const generate = async (workspace, options) => {
   const initial = loadDiary(workspace);
   validateProfile(initial.config);
@@ -32,8 +90,9 @@ export const generate = async (workspace, options) => {
   }
   const status = await diaryStatus(diary);
   if (options.strict && !status.complete) {
+    const gaps = strictGaps(status);
     throw new Error(
-      "Diary is not ready for final export. Run status to see missing entries, screenshots, suggestions, attendance, and reviews."
+      `Diary is not ready for final export. ${gaps.length} gap(s) to close:\n${gaps.map((gap) => `  - ${gap}`).join("\n")}`
     );
   }
   const result = await renderDiary(

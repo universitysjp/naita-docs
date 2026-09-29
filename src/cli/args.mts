@@ -37,6 +37,7 @@ const commandOptions = {
   rewrite: ["week", "from", "reason"],
   screenshots: ["week", "file", "text", "reason"],
   show: ["week"],
+  stamp: ["report", "report-pages", "diary", "diary-pages", "out"],
   status: ["week"],
   weeks: [],
 };

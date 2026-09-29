@@ -48,6 +48,9 @@ Agent workflow and PDF
   export                                 Alias for generate
   report [--out FILE.pdf] [--logo FILE] [--font times.ttf]
                                          Generate the report from diary data and screenshots
+  stamp [--report FILE.pdf] [--report-pages last]
+        [--diary FILE.pdf] [--diary-pages second,penultimate]
+        [--out FILE.pdf]                Collect the pages that need a rubber stamp
 
 Sections: work, problems, solutions, learning, improvements.
 Dates: YYYY-MM-DD, comma-separated or inclusive START..END ranges.
@@ -63,6 +66,10 @@ the next command; help, agent-guide, and generate --dry-run do not write logs.
 Init/import and normal commands refresh local/CHECKLIST.md and checklist.json.
 Import also prints the checklist. Write notes first; add screenshots last, then
 review/export. Capture ideas are optional, not proof of a screen or test result.
+stamp builds one small PDF from the pages that carry a signature, certification,
+or supervisor block, so a supervisor can be handed a few pages instead of the
+whole document. Page names: first, second, penultimate, last, or a page number.
+stamp needs the documents to exist already; generate or report them first.
 Report PDF: local/report/output/NAITA-Industrial-Training-Report-draft.pdf.
 Report generation preserves missing academic and company facts as placeholders
 and reports the remaining inputs in the CLI result.

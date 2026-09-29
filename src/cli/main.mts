@@ -26,6 +26,7 @@ import { generate } from "./export.mts";
 import { HELP } from "./help.mts";
 import { profileCommand } from "./profile.mts";
 import { formatReport, reportCommand } from "./report.mts";
+import { formatStamp, stampCommand } from "./stamp.mts";
 import { weeklyCommand } from "./weekly.mts";
 
 /** Repository root, used for the paths of tracked artefacts such as the template. */
@@ -252,6 +253,9 @@ async function dispatch(command, workspace, options) {
   if (command === "company") {
     return companyCommand(workspace, options);
   }
+  if (command === "stamp") {
+    return stampCommand(workspace, options);
+  }
   if (command === "report-template") {
     return buildTemplateReport(
       path.resolve(
@@ -275,6 +279,8 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(formatReport(result));
   } else if (command === "company") {
     console.log(formatCompany(result));
+  } else if (command === "stamp") {
+    console.log(formatStamp(result));
   } else if (command === "checklist") {
     console.log(formatChecklist(result, { markdown: false }));
   } else if (command === "import" && result.checklist) {

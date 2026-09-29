@@ -60,7 +60,7 @@ const TITLE_SMALL_WORDS = new Set([
  * (`HRMS`, `TrackIT`, `DevOps`) is left exactly as written, so an acronym or a
  * product name is never flattened.
  */
-const titleCase = (title) =>
+export const titleCase = (title) =>
   String(title)
     .split(" ")
     .map((word, index, words) => {

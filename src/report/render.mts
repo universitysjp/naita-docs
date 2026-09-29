@@ -26,7 +26,7 @@ import { embedImage } from "../pdf/images.mts";
 import { drawText, printable, wrap } from "../pdf/layout.mts";
 import { CONTENT, LEADING, PAGE } from "./layout.mts";
 import { addNavigation, isLinkablePage } from "./navigation.mts";
-import { ReportWriter } from "./writer.mts";
+import { ReportWriter, titleCase } from "./writer.mts";
 
 const LIST_SIZE = 11.5;
 const LIST_LEADING = 17;
@@ -248,8 +248,15 @@ const drawEntryList = (pdf, fonts, title, entries, anchors) => {
   return entries.length;
 };
 
-const drawCaptionList = (pdf, fonts, title, entries) => {
-  if (!entries.length) {
+/**
+ * The list of figures and the list of tables are one contents-style section, so
+ * the reader sees both on the same page and a second section title is not needed
+ * in the front matter. Each line is recorded as an anchor, exactly like a
+ * contents line, so clicking a caption opens the page it is printed on.
+ */
+const drawCaptionList = (pdf, fonts, groups, anchors) => {
+  const total = groups.reduce((sum, group) => sum + group.entries.length, 0);
+  if (!total) {
     return 0;
   }
   let page = addBlankPage(pdf);
@@ -258,39 +265,66 @@ const drawCaptionList = (pdf, fonts, title, entries) => {
     page = addBlankPage(pdf);
     y = PAGE.height - PAGE.marginTop;
   };
-  centerText(page, fonts, title, PAGE.height - 84, 15, fonts.bold);
-  for (const entry of entries) {
-    const pageText = String(entry.page);
-    const pageWidth = fonts.regular.widthOfTextAtSize(pageText, LIST_SIZE);
-    const label = `${entry.label}: ${entry.caption}`;
-    const lines = wrap(
-      label,
-      fonts.regular,
-      LIST_SIZE,
-      CONTENT - pageWidth - 16
-    );
-    if (y - lines.length * LIST_LEADING - 6 < PAGE.marginBottom) {
-      start();
-    }
-    for (const [index, line] of lines.entries()) {
-      const last = index === lines.length - 1;
-      const text = last ? leader(fonts, line, pageWidth, 0) : line;
-      drawText(page, text, PAGE.marginLeft, y, LIST_SIZE, fonts.regular);
-      if (last) {
-        drawText(
-          page,
-          pageText,
-          PAGE.width - PAGE.marginRight - pageWidth,
-          y,
-          LIST_SIZE,
-          fonts.regular
-        );
+  centerText(page, fonts, groups[0].title, PAGE.height - 84, 15, fonts.bold);
+  for (const [groupIndex, group] of groups.entries()) {
+    if (groupIndex > 0) {
+      y -= 6;
+      if (y < PAGE.marginBottom + 60) {
+        start();
       }
-      y -= LIST_LEADING;
+      drawText(
+        page,
+        printable(titleCase(group.title)),
+        PAGE.marginLeft,
+        y,
+        LIST_SIZE + 0.5,
+        fonts.bold
+      );
+      y -= LIST_LEADING + 4;
     }
-    y -= 5;
+    y -= 6;
+    for (const entry of group.entries) {
+      const pageText = String(entry.page);
+      const pageWidth = fonts.regular.widthOfTextAtSize(pageText, LIST_SIZE);
+      const label = `${entry.label}: ${entry.caption}`;
+      const lines = wrap(
+        label,
+        fonts.regular,
+        LIST_SIZE,
+        CONTENT - pageWidth - 16
+      );
+      if (y - lines.length * LIST_LEADING - 6 < PAGE.marginBottom) {
+        start();
+      }
+      const firstLineY = y;
+      for (const [index, line] of lines.entries()) {
+        const last = index === lines.length - 1;
+        const text = last ? leader(fonts, line, pageWidth, 0) : line;
+        drawText(page, text, PAGE.marginLeft, y, LIST_SIZE, fonts.regular);
+        if (last) {
+          drawText(
+            page,
+            pageText,
+            PAGE.width - PAGE.marginRight - pageWidth,
+            y,
+            LIST_SIZE,
+            fonts.regular
+          );
+        }
+        y -= LIST_LEADING;
+      }
+      anchors?.push({
+        height: lines.length * LIST_LEADING,
+        pageIndex: pdf.getPageCount() - 1,
+        targetPage: entry.page,
+        width: PAGE.width - PAGE.marginRight - PAGE.marginLeft,
+        x: PAGE.marginLeft,
+        y: firstLineY - LIST_SIZE * 0.25,
+      });
+      y -= 5;
+    }
   }
-  return entries.length;
+  return total;
 };
 const drawAbbreviations = (pdf, fonts, abbreviations) => {
   let page = addBlankPage(pdf);
@@ -510,7 +544,6 @@ const buildFrontMatter = async (document, options, body, shift) => {
     "preface",
     "tableOfContents",
     "listOfFigures",
-    "listOfTables",
     "abbreviations",
   ];
   for (const kind of order) {
@@ -527,24 +560,29 @@ const buildFrontMatter = async (document, options, body, shift) => {
       drawCaptionList(
         pdf,
         fonts,
-        "LIST OF FIGURES",
-        figures.map((item) => ({
-          caption: item.caption,
-          label: item.label.split(":")[0],
-          page: item.page,
-        }))
-      );
-    }
-    if (kind === "listOfTables") {
-      drawCaptionList(
-        pdf,
-        fonts,
-        "LIST OF TABLES",
-        tables.map((item) => ({
-          caption: item.caption,
-          label: item.label.split(":")[0],
-          page: item.page,
-        }))
+        [
+          {
+            entries: figures.map((item) => ({
+              caption: item.caption,
+              label: item.label.split(":")[0],
+              page: item.page,
+            })),
+            title: "LIST OF FIGURES",
+          },
+          ...(tables.length
+            ? [
+                {
+                  entries: tables.map((item) => ({
+                    caption: item.caption,
+                    label: item.label.split(":")[0],
+                    page: item.page,
+                  })),
+                  title: "LIST OF TABLES",
+                },
+              ]
+            : []),
+        ],
+        anchors
       );
     }
     if (kind === "abbreviations" && document.abbreviations?.length) {

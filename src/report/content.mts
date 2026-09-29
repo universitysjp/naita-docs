@@ -97,12 +97,11 @@ export const parseReferences = (markdown) =>
 /** `KEY - expansion` or `KEY, expansion`, one per line. */
 export const parseAbbreviations = (markdown) =>
   parseList(markdown).map((line) => {
-    const match = /^(?<key>[A-Za-z0-9/+.-]+)\s*[-–—:,]\s*(?<value>.+)$/u.exec(
-      line
-    );
+    const match =
+      /^(?<term>[A-Za-z0-9/+.-]+)\s*[-–—:,]\s*(?<expansion>.+)$/u.exec(line);
     return match
-      ? { key: match.groups.key, value: match.groups.value }
-      : { key: line, value: "" };
+      ? { expansion: match.groups.expansion, term: match.groups.term }
+      : { expansion: "", term: line };
   });
 
 const readMarkdown = (file) =>

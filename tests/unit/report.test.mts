@@ -1,7 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { afterEach, expect, it } from "vitest";
 
 import { fetchImages, imageSize } from "../../src/report/assets.mts";
@@ -532,4 +539,104 @@ it("keeps the generated sample report at thirty pages or more", async () => {
   }
   // Numbering goes to four levels somewhere in the sample.
   expect(all).toMatch(/\b2\.2\.3\.1\b/u);
+});
+
+it("prints the list of tables with the list of figures and links both lines", async () => {
+  context = workspace();
+  const out = path.join(context.root, "captions.pdf");
+  await renderReportDocument(
+    {
+      chapters: [
+        {
+          blocks: [{ kind: "paragraph", text: "Chapter body." }],
+          children: [
+            {
+              blocks: [
+                {
+                  caption: "A recorded figure",
+                  image: image(context.root, "caption.png"),
+                  kind: "figure",
+                },
+                {
+                  caption: "A recorded table",
+                  columns: [{ header: "One" }, { header: "Two" }],
+                  kind: "table",
+                  rows: [["a", "b"]],
+                },
+              ],
+              title: "Assigned Tasks",
+            },
+          ],
+          introTitle: "Introduction",
+          title: "Training Experience",
+        },
+      ],
+      cover,
+      title: "Report on Industrial Training",
+    },
+    out
+  );
+  const pages = await pdfPages(out);
+  const figuresPage = pages.find((page) =>
+    page.text.includes("LIST OF FIGURES")
+  );
+  // Both lists share one page, so the tables heading is not on a page of its own.
+  expect(figuresPage?.text, "list of tables is not with the figures").toContain(
+    "LIST OF TABLES"
+  );
+  expect(
+    pages.filter((page) => page.text.includes("LIST OF TABLES")).length
+  ).toBe(1);
+
+  // Every caption line is a link to the page the caption is printed on.
+  const task = getDocument({ data: new Uint8Array(readFileSync(out)) });
+  const document = await task.promise;
+  try {
+    const links = [];
+    for (let number = 1; number <= document.numPages; number += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- pages are read in order
+      const page = await document.getPage(number);
+      // oxlint-disable-next-line no-await-in-loop
+      links.push(...(await page.getAnnotations()));
+    }
+    const linksOnList = links.filter(
+      (item) => item.subtype === "Link" && item.overlaidText
+    );
+    expect(linksOnList.length).toBeGreaterThanOrEqual(2);
+    expect(linksOnList.every((item) => item.dest)).toBe(true);
+    const captions = linksOnList.map((item) => item.overlaidText || "");
+    expect(captions.some((text) => text.includes("A recorded figure"))).toBe(
+      true
+    );
+    expect(captions.some((text) => text.includes("A recorded table"))).toBe(
+      true
+    );
+  } finally {
+    await task.destroy();
+  }
+});
+
+it("prints the abbreviations written in the content workspace", async () => {
+  context = workspace();
+  const out = path.join(context.root, "abbreviations.pdf");
+  await renderReportDocument(
+    {
+      abbreviations: [{ expansion: "National Authority", term: "NAITA" }],
+      chapters: [
+        {
+          blocks: [{ kind: "paragraph", text: "Chapter body." }],
+          introTitle: "Introduction",
+          title: "Training Organization",
+        },
+      ],
+      cover,
+      title: "Report on Industrial Training",
+    },
+    out
+  );
+  const pages = await pdfPages(out);
+  const all = pages.map((page) => page.text).join(" ");
+  expect(all).toContain("ABBREVIATIONS");
+  expect(all).toContain("NAITA");
+  expect(all).toContain("National Authority");
 });

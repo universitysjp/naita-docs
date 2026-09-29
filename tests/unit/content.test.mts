@@ -57,17 +57,17 @@ it("reads a section as a lead paragraph plus titled items with figures", () => {
   ]);
 });
 
-it("reads an abbreviation line into a key and an expansion", () => {
+it("reads an abbreviation line into a term and an expansion", () => {
   expect(
     parseAbbreviations("NAITA - National Authority\nUI, User Interface\n")
   ).toEqual([
-    { key: "NAITA", value: "National Authority" },
-    { key: "UI", value: "User Interface" },
+    { expansion: "National Authority", term: "NAITA" },
+    { expansion: "User Interface", term: "UI" },
   ]);
 });
 
-it("keeps a line that has no separator as the key with an empty expansion", () => {
-  expect(parseAbbreviations("ISO\n")).toEqual([{ key: "ISO", value: "" }]);
+it("keeps a line that has no separator as the term with an empty expansion", () => {
+  expect(parseAbbreviations("ISO\n")).toEqual([{ expansion: "", term: "ISO" }]);
 });
 
 it("returns empty results for a report with no written content", () => {

@@ -17,6 +17,7 @@ import path from "node:path";
 
 import { scanScreenshots } from "../diary/screenshots.mts";
 import { imageKind, imageSize } from "./assets.mts";
+import { COMPANY_FIELDS } from "./company.mts";
 import { loadContent } from "./content.mts";
 
 const STREAMS = [
@@ -343,6 +344,9 @@ const sectionProblemRows = (weeks) => {
  * keeps department, faculty, and institute apart because the daily diary needs
  * them separately, so the report joins whatever the profile actually holds.
  */
+/** "1 week" and "26 weeks", never a machine count. */
+const weekCount = (count) => `${count} ${count === 1 ? "week" : "weeks"}`;
+
 const instituteLines = (config) =>
   [config.department, config.faculty, config.institute]
     .map((part) => String(part ?? "").trim())
@@ -426,16 +430,37 @@ const eventBlocks = (section, establishment, reportRoot, placeholder) => {
   ];
 };
 
+/**
+ * The establishment's public facts, labelled for a reader rather than for a
+ * machine: the key of a stored fact is never printed. A fact that carries a web
+ * address shows it, because a reader has to be able to check where a claim came
+ * from; a fact recorded from the training registration carries no address, so
+ * printing "source: ..." there would only expose how the file was filled in.
+ */
 const companyFacts = (company) => {
-  if (!company?.record) {
-    return [];
-  }
-  return Object.entries(company.record)
-    .filter(([, entry]) => entry?.value)
-    .map(([key, entry]) => ({
-      label: key,
-      value: `${entry.value} (source: ${entry.source})`,
-    }));
+  const record = company?.record || {};
+  return COMPANY_FIELDS.filter((field) => record[field.key]?.value).map(
+    (field) => {
+      const entry = record[field.key];
+      const isPublished = /^https?:\/\//u.test(entry.source || "");
+      return {
+        label: field.label,
+        value: isPublished ? `${entry.value} (${entry.source})` : entry.value,
+      };
+    }
+  );
+};
+
+/**
+ * A recorded fact the field list does not name is a sentence rather than a
+ * value, so it is written as a paragraph instead of a row with a raw key.
+ */
+const companyNotes = (company) => {
+  const record = company?.record || {};
+  const known = new Set(COMPANY_FIELDS.map((field) => field.key));
+  return Object.entries(record)
+    .filter(([key, entry]) => !known.has(key) && entry?.value)
+    .map(([, entry]) => entry.value);
 };
 
 const hasResearch = (company) =>
@@ -484,6 +509,7 @@ const buildChapters = ({
                   },
                 ],
           },
+          ...(hasResearch(company) ? paragraphs(companyNotes(company)) : []),
           ...(hasResearch(company)
             ? []
             : [
@@ -541,7 +567,7 @@ const buildChapters = ({
   {
     blocks: paragraphs([
       "This chapter describes the training itself. The diary weeks are the evidence base, but they are grouped into work streams here so the report reads as an account of the placement rather than a list of weeks. Each stream explains what the work was, what it changed, and how it was checked.",
-      `The training covered ${complete.length} recorded week(s) between ${config.trainingStart || "the start date"} and ${config.trainingEnd || "the end date"}. The placement is allocated for six months; work recorded after that period is a later extension or a permanent post and does not belong in this report.`,
+      `The training covered ${weekCount(complete.length)} from ${config.trainingStart || "the start date"} to ${config.trainingEnd || "the end date"}. The placement was allocated for six months, which is where the diary ends.`,
     ]),
     children: [
       {
@@ -581,7 +607,7 @@ const buildChapters = ({
           blocks: [
             {
               kind: "paragraph",
-              text: `This work was recorded across ${stream.weeks.length} week(s): ${weekLabel(stream.weeks)}.`,
+              text: `This work was recorded across ${weekCount(stream.weeks.length)}: ${weekLabel(stream.weeks)}.`,
             },
             bullets(stream.points),
             // Each week's screenshots appear in one stream only, so a figure is

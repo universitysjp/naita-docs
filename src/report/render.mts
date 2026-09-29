@@ -25,6 +25,7 @@ import { embedTimesFamily } from "../pdf/fonts.mts";
 import { embedImage } from "../pdf/images.mts";
 import { drawText, printable, wrap } from "../pdf/layout.mts";
 import { CONTENT, LEADING, PAGE } from "./layout.mts";
+import { addNavigation, isLinkablePage } from "./navigation.mts";
 import { ReportWriter } from "./writer.mts";
 
 const LIST_SIZE = 11.5;
@@ -109,10 +110,13 @@ const drawCover = async (pdf, fonts, document, logo) => {
     });
     cursor -= size + 16;
   }
-  if (cover.institute) {
-    centerText(page, fonts, cover.institute, cursor, 13, fonts.regular);
-    cursor -= 20;
+  // The academic home of the degree is one part per line: joined into a single
+  // line it is wider than the page and the ends are cut off.
+  for (const line of cover.instituteLines || []) {
+    centerText(page, fonts, line, cursor, 12.5, fonts.regular);
+    cursor -= 17;
   }
+  cursor -= 3;
   if (cover.trainingLocation) {
     centerText(
       page,
@@ -175,7 +179,7 @@ const leader = (fonts, line, pageWidth, indent) => {
  * A contents-style list with dot leaders. A long label wraps and keeps its page
  * number on the last line, which is how a reader scans the list.
  */
-const drawEntryList = (pdf, fonts, title, entries) => {
+const drawEntryList = (pdf, fonts, title, entries, anchors) => {
   if (!entries.length) {
     return 0;
   }
@@ -203,6 +207,7 @@ const drawEntryList = (pdf, fonts, title, entries) => {
     if (y - needed < PAGE.marginBottom) {
       start();
     }
+    const firstLineY = y;
     for (const [index, line] of lines.entries()) {
       const last = index === lines.length - 1;
       // The page number sits on the last line, after a dot leader, so a wrapped
@@ -228,6 +233,16 @@ const drawEntryList = (pdf, fonts, title, entries) => {
       }
       y -= LIST_LEADING;
     }
+    // The whole line, including the dot leader and the page number, is the
+    // clickable area, so a reader can click anywhere along it.
+    anchors?.push({
+      height: lines.length * LIST_LEADING,
+      pageIndex: pdf.getPageCount() - 1,
+      targetPage: entry.page,
+      width: PAGE.width - PAGE.marginRight - (PAGE.marginLeft + indent),
+      x: PAGE.marginLeft + indent,
+      y: firstLineY - LIST_SIZE * 0.25,
+    });
     y -= 5;
   }
   return entries.length;
@@ -314,13 +329,22 @@ const drawAbbreviations = (pdf, fonts, abbreviations) => {
   return abbreviations.length;
 };
 
+/** One printed line for a reference, skipping the parts it does not carry. */
+const referenceText = (reference) =>
+  [
+    reference.author,
+    reference.title,
+    reference.detail,
+    reference.url ? `Available at: ${reference.url}.` : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+
 const drawReferences = (writer, references) => {
   writer.newPage();
   const entry = writer.heading("REFERENCES", 1);
   for (const reference of references) {
-    const text = `${reference.author}. ${reference.title}. ${reference.detail}${
-      reference.url ? ` Available at: ${reference.url}.` : ""
-    }`;
+    const text = referenceText(reference);
     const lines = wrap(
       printable(text),
       writer.fonts.regular,
@@ -350,7 +374,7 @@ const drawReferences = (writer, references) => {
 const drawSignatureBlock = (writer, certification) => {
   writer.newPage();
   const entry = writer.heading(
-    certification.title || "SUPERVISOR CERTIFICATION",
+    certification.title || "Supervisor Certification",
     1
   );
   if (certification.declaration) {
@@ -465,6 +489,9 @@ const buildFrontMatter = async (document, options, body, shift) => {
   const pdf = await PDFDocument.create();
   const fonts = await embedTimesFamily(pdf, options.font);
   const offset = (page) => (shift === null ? page : page + shift);
+  // Where each contents line was printed, kept so the finished document can put
+  // a clickable link over it.
+  const anchors = [];
   const entries = body.entries.map((entry) => ({
     ...entry,
     page: offset(entry.page),
@@ -494,7 +521,7 @@ const buildFrontMatter = async (document, options, body, shift) => {
       drawProsePage(pdf, fonts, "PREFACE", document.preface);
     }
     if (kind === "tableOfContents") {
-      drawEntryList(pdf, fonts, "TABLE OF CONTENTS", entries);
+      drawEntryList(pdf, fonts, "TABLE OF CONTENTS", entries, anchors);
     }
     if (kind === "listOfFigures") {
       drawCaptionList(
@@ -524,7 +551,7 @@ const buildFrontMatter = async (document, options, body, shift) => {
       drawAbbreviations(pdf, fonts, document.abbreviations);
     }
   }
-  return { fonts, frontPages: pdf.getPageCount(), pdf };
+  return { anchors, fonts, frontPages: pdf.getPageCount(), pdf };
 };
 
 export const renderReportDocument = async (
@@ -556,6 +583,27 @@ export const renderReportDocument = async (
       pdf.getPageCount()
     );
   }
+  // A printed page number is 1-based, so a page that carries the number n is at
+  // index n - 1 in the finished document.
+  const links = front.anchors
+    .map((anchor) => ({
+      height: anchor.height,
+      pageIndex: anchor.pageIndex,
+      targetIndex: anchor.targetPage - 1,
+      width: anchor.width,
+      x: anchor.x,
+      y: anchor.y,
+    }))
+    .filter((link) => isLinkablePage(pdf, link.pageIndex))
+    .filter((link) => isLinkablePage(pdf, link.targetIndex));
+  const outline = body.entries
+    .map((entry) => ({
+      depth: entry.depth,
+      pageIndex: entry.page + shift - 1,
+      title: `${entry.label ? `${entry.label} ` : ""}${entry.title}`,
+    }))
+    .filter((entry) => isLinkablePage(pdf, entry.pageIndex));
+  addNavigation(pdf, { links, outline });
   pdf.setTitle(document.title);
   pdf.setAuthor(document.cover.name);
   pdf.setSubject("Industrial training report");
@@ -564,6 +612,8 @@ export const renderReportDocument = async (
   return {
     figures: body.figures.length,
     frontMatterPages: shift,
+    links: links.length,
+    outline: outline.length,
     pages: pdf.getPageCount(),
     path: target,
     tables: body.tables.length,

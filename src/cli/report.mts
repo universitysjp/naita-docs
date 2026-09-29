@@ -1,21 +1,95 @@
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { diaryStatus } from "../diary/status.mts";
 import { loadDiary, paths } from "../diary/store.mts";
 import { loadCompany } from "../report/company.mts";
+import { loadContent } from "../report/content.mts";
 import { buildReportFromDiary } from "../report/from-diary.mts";
 import { renderReportDocument } from "../report/render.mts";
 
 const DEFAULT_NAME = "NAITA-Industrial-Training-Report-draft.pdf";
 
-const reportInputs = () => [
-  "University, faculty, and department wording",
-  "Course, degree, and field",
-  "Student number and NAITA registration number",
-  "Approved organization facts and image permissions",
-  "Supervisor name and designation for the certification page",
-  "Any events or non-technical experience the trainee wants recorded",
-];
+/**
+ * Reports only what the workspace cannot supply yet, so the list shortens as
+ * the student fills the profile and supplies the prose the renderer draws.
+ */
+const reportInputs = (missing) => {
+  const items = [];
+  if (missing.profile.length) {
+    items.push(`Profile fields still blank: ${missing.profile.join(", ")}`);
+  }
+  if (!missing.supervisor) {
+    items.push("Supervisor name and designation for the certification page");
+  }
+  if (!missing.prose.acknowledgement) {
+    items.push("Acknowledgement text");
+  }
+  if (!missing.prose.preface) {
+    items.push("Preface text");
+  }
+  if (!missing.prose.references) {
+    items.push("Reference list with sources for every external claim");
+  }
+  if (!missing.prose.abbreviations) {
+    items.push("Abbreviation list");
+  }
+  if (!missing.sections.events) {
+    items.push("Events and non-technical experience for section 2.6");
+  }
+  if (missing.sections.placeholder.length) {
+    items.push(
+      `Section text still marked as a placeholder: ${missing.sections.placeholder.join(", ")}`
+    );
+  }
+  if (missing.assets.pending) {
+    items.push("Asset permissions or redaction checks still pending");
+  }
+  if (!missing.formatRules) {
+    items.push("Official submission and formatting rules");
+  }
+  return items;
+};
+
+/**
+ * Walks the built document for any block still marked as a placeholder, so the
+ * gap list names the section the student has not written yet instead of
+ * guessing from the workspace layout.
+ */
+const pendingContentSections = (document) => {
+  const pending = [];
+  const visit = (nodes, section) => {
+    for (const node of nodes || []) {
+      if (node.kind === "placeholder") {
+        pending.push(section || "unnamed section");
+      }
+      const title = node.title || section;
+      if (node.blocks) {
+        visit(node.blocks, title);
+      }
+      if (node.children) {
+        visit(node.children, title);
+      }
+    }
+  };
+  visit(document.chapters, "");
+  return pending;
+};
+
+/** Asset register entries whose permission or redaction check is outstanding. */
+const pendingAssets = (reportRoot) => {
+  const file = path.join(reportRoot, "assets", "register.json");
+  if (!existsSync(file)) {
+    return 0;
+  }
+  const register = JSON.parse(readFileSync(file, "utf-8"));
+  return (register.assets || []).filter(
+    (asset) =>
+      asset.permissionStatus !== "approved" ||
+      (asset.redactionStatus !== "not-applicable" &&
+        asset.redactionStatus !== "checked")
+  ).length;
+};
 
 export const reportCommand = async (workspace, options = {}) => {
   const diary = loadDiary(workspace);
@@ -31,6 +105,7 @@ export const reportCommand = async (workspace, options = {}) => {
     company,
     preface: options.preface,
     references: options.references,
+    reportRoot,
   });
   const result = await renderReportDocument(document, output, {
     font: options.font,
@@ -45,14 +120,30 @@ export const reportCommand = async (workspace, options = {}) => {
       review: week.reviewed,
       screenshots: week.screenshots.images.length,
     }));
+  const content = loadContent(reportRoot);
+  const pendingSections = pendingContentSections(document);
   const missing = {
     absencesConfirmed: status.absencesConfirmed,
+    assets: pendingAssets(reportRoot),
     companyResearch: Object.keys(company.record || {}).length,
+    formatRules: false,
     incompleteWeeks,
     profile: status.profile.missing,
-    reportInputs: reportInputs(),
+    prose: {
+      abbreviations: content.abbreviations.length > 0,
+      acknowledgement: content.acknowledgement.length > 0,
+      preface: content.preface.length > 0,
+      references: content.references.length > 0,
+    },
     requiredProfile: status.profile.requiredMissing,
+    sections: {
+      events:
+        content.events.paragraphs.length + content.events.items.length > 0,
+      placeholder: pendingSections,
+    },
+    supervisor: Boolean(diary.config.supervisor),
   };
+  missing.reportInputs = reportInputs(missing);
   const missingCount =
     missing.profile.length +
     incompleteWeeks.length +

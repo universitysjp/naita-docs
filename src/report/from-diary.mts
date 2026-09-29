@@ -12,10 +12,12 @@
  * user-facing work down to the foundations.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import { scanScreenshots } from "../diary/screenshots.mts";
 import { imageKind, imageSize } from "./assets.mts";
+import { loadContent } from "./content.mts";
 
 const STREAMS = [
   {
@@ -278,6 +280,29 @@ const figureBlocks = (images) =>
   });
 
 /**
+ * Event photographs live beside the report assets rather than in a weekly
+ * screenshot folder, so they are resolved by name and skipped when the file is
+ * absent. A missing photograph must not stop the report from being written.
+ */
+const eventFigureBlocks = (file, caption, establishment, reportRoot) => {
+  const image = path.join(reportRoot, "assets", "organization", "events", file);
+  if (!existsSync(image)) {
+    return [];
+  }
+  const bytes = readFileSync(image);
+  const { height, width } = imageSize(bytes);
+  return [
+    {
+      caption:
+        caption ||
+        `${establishment || "Company"} photograph from the placement`,
+      image: { height, kind: imageKind(bytes), path: image, width },
+      kind: "figure",
+    },
+  ];
+};
+
+/**
  * Charts are built from the diary's own numbers, not invented. Where there is
  * nothing to plot, the section says what would be charted and the student adds
  * the figure, rather than the report drawing a made-up graph.
@@ -313,6 +338,94 @@ const sectionProblemRows = (weeks) => {
   ]);
 };
 
+/**
+ * The cover prints one line for the academic home of the degree. The profile
+ * keeps department, faculty, and institute apart because the daily diary needs
+ * them separately, so the report joins whatever the profile actually holds.
+ */
+const instituteLines = (config) =>
+  [config.department, config.faculty, config.institute]
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean);
+
+/**
+ * Written content for one section, or the caller's placeholder when the student
+ * has not written it. Prose is drawn as paragraphs; a section that is a list of
+ * points, such as a self assessment, is drawn as bullets.
+ */
+const proseBlocks = (
+  lines,
+  placeholder,
+  { as = "paragraphs", marker = "arrow" } = {}
+) => {
+  if (!lines.length) {
+    return [placeholder];
+  }
+  return as === "bullets"
+    ? [{ items: lines, kind: "bullets", marker }]
+    : lines.map((text) => ({ kind: "paragraph", text }));
+};
+
+/**
+ * The placement reporting line, drawn only from what the profile confirms. A
+ * missing supervisor simply shortens the tree rather than inventing one.
+ */
+const teamTree = (config) => {
+  const director = {
+    children: config.teamLead
+      ? [
+          {
+            children: [
+              {
+                children: [],
+                label: "Team members",
+                role: "Software engineers, including the trainee",
+              },
+            ],
+            label: "Team lead",
+            role: config.teamLead,
+          },
+        ]
+      : [],
+    label: "Supervisor",
+    role: config.supervisorDesignation || "",
+  };
+  if (!config.supervisor && !config.supervisorDesignation) {
+    director.label = "Training team";
+  }
+  return {
+    children: [director],
+    label: config.establishment || "Training establishment",
+    role: config.trainingLocation || "",
+  };
+};
+
+/**
+ * A written event section: the lead paragraphs, then each titled item with the
+ * photographs the student placed under it. A photograph that is referenced but
+ * not present is dropped rather than failing the whole report.
+ */
+const eventBlocks = (section, establishment, reportRoot, placeholder) => {
+  if (!section.paragraphs.length && !section.items.length) {
+    return [placeholder];
+  }
+  return [
+    ...section.paragraphs.map((text) => ({ kind: "paragraph", text })),
+    ...section.items.flatMap((item) => [
+      { bold: true, kind: "paragraph", text: `${item.title}.` },
+      ...item.paragraphs.map((text) => ({ kind: "paragraph", text })),
+      ...item.figures.flatMap((figure) =>
+        eventFigureBlocks(
+          figure.file,
+          figure.caption,
+          establishment,
+          reportRoot
+        )
+      ),
+    ]),
+  ];
+};
+
 const companyFacts = (company) => {
   if (!company?.record) {
     return [];
@@ -345,6 +458,8 @@ const buildChapters = ({
   company,
   complete,
   config,
+  content,
+  reportRoot,
   screenshots,
   streams,
 }) => [
@@ -381,20 +496,31 @@ const buildChapters = ({
         ],
         children: [
           {
-            blocks: [
-              {
-                kind: "placeholder",
-                note: "Add the nature of the business here, with the public source it came from. Describe what the company does and who it does it for, in two or three sentences.",
-              },
-            ],
+            blocks: proseBlocks(content.natureOfBusiness, {
+              kind: "placeholder",
+              note: "Add the nature of the business here, with the public source it came from. Describe what the company does and who it does it for, in two or three sentences.",
+            }),
             title: "Nature of the Business",
           },
           {
             blocks: [
-              {
+              ...proseBlocks(content.organisationStructure, {
                 kind: "placeholder",
-                note: "Add the organisation chart or team structure here. Use the orgTree drawing so it scales to the page, and name only the teams the trainee could actually confirm.",
-              },
+                note: "Add the team structure here. Name only the people and teams the trainee could confirm, and leave out any part of the organisation the placement did not expose.",
+              }),
+              ...(content.organisationStructure.length
+                ? [
+                    {
+                      caption: "Team structure during the placement",
+                      drawing: {
+                        kind: "orgTree",
+                        title: "Placement team structure",
+                        tree: teamTree(config),
+                      },
+                      kind: "drawing",
+                    },
+                  ]
+                : []),
             ],
             title: "Organisation Structure",
           },
@@ -402,16 +528,10 @@ const buildChapters = ({
         title: `About ${config.establishment || "the Training Establishment"}`,
       },
       {
-        blocks: [
-          {
-            kind: "placeholder",
-            note: "Add the company vision, mission, goals, and objectives here, each with the public page it was taken from. Omit anything the company does not publish.",
-          },
-          {
-            kind: "placeholder",
-            note: "Add the working practices the trainee observed: how work is planned and reviewed, how quality is checked, and how access to systems and data is controlled.",
-          },
-        ],
+        blocks: proseBlocks(content.managementPractices, {
+          kind: "placeholder",
+          note: "Add the working practices the trainee observed: how work is planned and reviewed, how quality is checked, and how access to systems and data is controlled.",
+        }),
         title: "Management Practices",
       },
     ],
@@ -425,26 +545,24 @@ const buildChapters = ({
     ]),
     children: [
       {
-        blocks: [
-          {
-            kind: "placeholder",
-            note: "Describe how the placement was arranged: the interview, the start date, the induction, the first change, and who supervised the work. Name people only if the trainee has confirmed it is appropriate to do so.",
-          },
-        ],
+        blocks: proseBlocks(content.placementIntroduction, {
+          kind: "placeholder",
+          note: "Describe how the placement was arranged: the start date, the induction, the first change, and who supervised the work. Name people only if the trainee has confirmed it is appropriate to do so.",
+        }),
         title: "Introduction to the Placement",
       },
       {
         blocks: [
-          {
+          ...proseBlocks(content.learningPeriod, {
             kind: "placeholder",
             note: "Describe the technical foundations learned before any feature was assigned: the frameworks, the languages, the databases, the deployment practice, and the review process. Explain what each was used for rather than describing the tool in general.",
-          },
+          }),
           ...(pointTexts(complete, "learning").length
             ? [
                 {
                   items: pointTexts(complete, "learning").slice(0, 8),
                   kind: "bullets",
-                  marker: "diamond",
+                  marker: "arrow",
                 },
               ]
             : []),
@@ -522,12 +640,10 @@ const buildChapters = ({
         title: "Achievements",
       },
       {
-        blocks: [
-          {
-            kind: "placeholder",
-            note: "Add the non-technical experiences here: meetings, code reading sessions, training days, safety briefings, and events. Only what the trainee confirms they attended, and never a named attendee or an invented quotation.",
-          },
-        ],
+        blocks: eventBlocks(content.events, config.establishment, reportRoot, {
+          kind: "placeholder",
+          note: "Add the non-technical experiences here: training days, safety briefings, knowledge sharing sessions, and events. Only what the trainee confirms they attended, and never a named attendee or an invented quotation.",
+        }),
         title: "Events Involved",
       },
       {
@@ -553,12 +669,10 @@ const buildChapters = ({
     ]),
     children: [
       {
-        blocks: [
-          {
-            kind: "placeholder",
-            note: "Write the conclusion here. State what the training produced, which habit mattered most, and what the work delivered says about the level reached. Keep it to three or four short paragraphs.",
-          },
-        ],
+        blocks: proseBlocks(content.conclusion, {
+          kind: "placeholder",
+          note: "Write the conclusion here. State what the training produced, which habit mattered most, and what the work delivered says about the level reached. Keep it to three or four short paragraphs.",
+        }),
         title: "Conclusion of the Report",
       },
       {
@@ -570,54 +684,61 @@ const buildChapters = ({
         ],
         children: [
           {
-            blocks: [
-              bullets([
-                "Replace with the strengths the trainee is confident about.",
-              ]),
-            ],
+            blocks: proseBlocks(
+              content.strengths,
+              {
+                kind: "placeholder",
+                note: "Replace with the strengths the trainee is confident about.",
+              },
+              { as: "bullets", marker: "dot" }
+            ),
             title: "Strengths",
           },
           {
-            blocks: [
-              bullets([
-                "Replace with the weaknesses the trainee is honest about.",
-              ]),
-            ],
+            blocks: proseBlocks(
+              content.weaknesses,
+              {
+                kind: "placeholder",
+                note: "Replace with the weaknesses the trainee is honest about.",
+              },
+              { as: "bullets", marker: "dot" }
+            ),
             title: "Weaknesses",
           },
           {
-            blocks: [
-              bullets(["Replace with what the trainee could take on next."]),
-            ],
+            blocks: proseBlocks(
+              content.opportunities,
+              {
+                kind: "placeholder",
+                note: "Replace with what the trainee could take on next.",
+              },
+              { as: "bullets", marker: "dot" }
+            ),
             title: "Opportunities",
           },
           {
-            blocks: [
-              bullets([
-                "Replace with what could go wrong and how to reduce it.",
-              ]),
-            ],
+            blocks: proseBlocks(
+              content.threats,
+              {
+                kind: "placeholder",
+                note: "Replace with what could go wrong and how to reduce it.",
+              },
+              { as: "bullets", marker: "dot" }
+            ),
             title: "Threats to Development",
           },
         ],
         title: "Personal SWOT Analysis",
       },
       {
-        blocks: [
-          {
-            items: [
-              "Record the owner of each business rule in one place, so two teams cannot both believe they own it.",
-              "Keep edge cases in the same file as the check, so they are written with the change.",
-              "Add an accessibility pass to the definition of done rather than treating it as a separate task.",
-            ],
-            kind: "list",
-            ordered: true,
-          },
+        blocks: proseBlocks(
+          content.suggestions,
           {
             kind: "placeholder",
             note: "Add the trainee's own suggestions for improving the placement, the project, or the way the work was handed over.",
           },
-        ],
+          { as: "bullets", marker: "dot" }
+        ),
         title: "Suggestions for Improvement",
       },
     ],
@@ -628,8 +749,37 @@ const buildChapters = ({
 
 // The cover prints the establishment's own address under its name and the
 // placement's location further down, so the two must not be the same value.
+/**
+ * The cover carries the address the placement was actually carried out at. A
+ * public listing of the registered address is a second, different address, so it
+ * is only used when the worksite address is not known.
+ */
+const buildCover = (config, company, fallbackAddress) => {
+  const researchedAddress = company?.record?.address?.value;
+  const researchedPlace = company?.record?.headquarters?.value;
+  const establishmentAddress = config.trainingLocation
+    ? ""
+    : researchedAddress || researchedPlace || fallbackAddress;
+  return {
+    category: config.category,
+    course: config.course,
+    establishment: config.establishment || "[ESTABLISHMENT NOT RECORDED]",
+    establishmentAddress,
+    field: config.field,
+    instituteLines: instituteLines(config),
+    naitaRegistration: config.naitaRegistration,
+    name: config.name || "[NAME NOT RECORDED]",
+    studentNumber: config.studentNumber,
+    trainingEnd: config.trainingEnd || "[END DATE NOT RECORDED]",
+    trainingLocation: config.trainingLocation,
+    trainingStart: config.trainingStart || "[START DATE NOT RECORDED]",
+  };
+};
+
 export const buildReportFromDiary = async (diary, options = {}) => {
   const { config, weeks } = diary;
+  const reportRoot = options.reportRoot || "";
+  const content = loadContent(reportRoot);
   const complete = weeks.filter((week) =>
     ["work", "problems", "solutions", "learning", "improvements"].some(
       (section) => textOf(week.entry.sections[section]).length
@@ -640,42 +790,23 @@ export const buildReportFromDiary = async (diary, options = {}) => {
   const chart = workChart(streams);
   const screenshots = assignScreenshots(byWeek, streams);
   const { company } = options;
-  const record = company?.record || {};
-  const researchedAddress = record.address?.value;
-  const researchedPlace = record.headquarters?.value;
-  const establishmentAddress =
-    researchedAddress || researchedPlace || options.establishmentAddress;
 
   const document = {
-    abbreviations: options.abbreviations,
-    acknowledgement: options.acknowledgement,
+    abbreviations: options.abbreviations || content.abbreviations,
+    acknowledgement: options.acknowledgement || content.acknowledgement,
     chapters: buildChapters({
       chart,
       company,
       complete,
       config,
+      content,
+      reportRoot,
       screenshots,
       streams,
     }),
-    cover: {
-      category: config.category,
-      course: config.course,
-      establishment: config.establishment || "[ESTABLISHMENT NOT RECORDED]",
-      establishmentAddress:
-        establishmentAddress === config.trainingLocation
-          ? ""
-          : establishmentAddress,
-      field: config.field,
-      institute: config.institute,
-      naitaRegistration: config.naitaRegistration,
-      name: config.name || "[NAME NOT RECORDED]",
-      studentNumber: config.studentNumber,
-      trainingEnd: config.trainingEnd || "[END DATE NOT RECORDED]",
-      trainingLocation: config.trainingLocation,
-      trainingStart: config.trainingStart || "[START DATE NOT RECORDED]",
-    },
-    preface: options.preface,
-    references: options.references,
+    cover: buildCover(config, company, options.establishmentAddress),
+    preface: options.preface || content.preface,
+    references: options.references || content.references,
     title: "Report on Industrial Training",
   };
   if (options.certification !== false) {
@@ -683,11 +814,11 @@ export const buildReportFromDiary = async (diary, options = {}) => {
       declaration:
         "I hereby declare that I have checked this report on the industrial training, and that, to my knowledge, it contains only the activities carried out during the placement and is adequate in scope and quality for submission as partial fulfilment of the degree.",
       fields: [
-        { label: "Name", value: "" },
-        { label: "Designation", value: "" },
+        { label: "Name", value: config.supervisor || "" },
+        { label: "Designation", value: config.supervisorDesignation || "" },
         { label: "Date", value: "" },
       ],
-      title: "SUPERVISOR CERTIFICATION",
+      title: "Supervisor Certification",
     };
   }
   return { document, warnings };

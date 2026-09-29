@@ -140,7 +140,7 @@ it("builds the report from the diary, with figures inside their work stream", as
     "Chapter 1: Training Organization",
     "Chapter 2: Training Experience",
     "Chapter 3: Conclusion",
-    "SUPERVISOR CERTIFICATION",
+    "Supervisor Certification",
   ]) {
     expect(all, `missing ${heading}`).toContain(heading);
   }

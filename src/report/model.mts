@@ -20,12 +20,12 @@ export type Block =
   | { kind: "keyValue"; rows: KeyValueRow[] }
   | { kind: "list"; items: string[]; ordered?: boolean }
   | { kind: "pageBreak" }
-  | { kind: "paragraph"; text: string }
+  | { bold?: boolean; kind: "paragraph"; text: string }
   | { kind: "placeholder"; note: string }
   | { kind: "table"; caption: string; columns: TableColumn[]; rows: string[][] }
   | { kind: "spacer"; size?: number };
 
-export type BulletMarker = "arrow" | "bullet" | "dash" | "diamond" | "square";
+export type BulletMarker = "arrow" | "dot";
 
 export interface TableColumn {
   align?: "center" | "left" | "right";
@@ -152,7 +152,8 @@ export interface CoverFields {
   establishment: string;
   establishmentAddress?: string;
   field?: string;
-  institute?: string;
+  /** One line per part, so a long faculty and university name cannot overflow. */
+  instituteLines?: string[];
   name: string;
   naitaRegistration?: string;
   studentNumber?: string;

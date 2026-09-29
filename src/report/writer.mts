@@ -31,6 +31,51 @@ import {
 // page is scaled to fit rather than being split.
 const MAX_FIGURE_HEIGHT = 320;
 
+// Words kept lowercase inside a title unless they open or close it.
+const TITLE_SMALL_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "but",
+  "by",
+  "for",
+  "from",
+  "in",
+  "nor",
+  "of",
+  "on",
+  "or",
+  "per",
+  "the",
+  "to",
+  "via",
+  "with",
+]);
+
+/**
+ * Headings are written in sentence case in the workspace, and a report is
+ * expected to print them in title case. A word that already carries capitals
+ * (`HRMS`, `TrackIT`, `DevOps`) is left exactly as written, so an acronym or a
+ * product name is never flattened.
+ */
+const titleCase = (title) =>
+  String(title)
+    .split(" ")
+    .map((word, index, words) => {
+      if (/[A-Z]/u.test(word.slice(1)) || /[A-Z]/u.test(word)) {
+        return word;
+      }
+      const lower = word.toLowerCase();
+      const isEdge = index === 0 || index === words.length - 1;
+      if (!isEdge && TITLE_SMALL_WORDS.has(lower)) {
+        return lower;
+      }
+      return lower.replace(/^./u, (first) => first.toUpperCase());
+    })
+    .join(" ");
+
 const HEADING_GAP_BEFORE = { 1: 0, 2: 16, 3: 13, 4: 11 };
 const HEADING_GAP_AFTER = { 1: 20, 2: 10, 3: 8, 4: 7 };
 const HEADING_SIZES = {
@@ -41,9 +86,11 @@ const HEADING_SIZES = {
 };
 
 /**
- * Times New Roman has a bullet, a small square, and a dash, but no arrowhead or
- * diamond. The sample report uses both, so the shapes that the font lacks are
- * drawn as vectors instead of being silently swapped for a different glyph.
+ * Times New Roman has a round bullet but no arrowhead, so the arrow is drawn as
+ * a vector instead of being silently swapped for a different glyph. A report
+ * prints two marker shapes only: the arrow for reported work, and the round dot
+ * for the trainee's own assessment. Any other marker in a document is read as
+ * the arrow, so a list can never print a third shape.
  */
 const drawArrowhead = (page, x, y, size) => {
   const head = size * 0.42;
@@ -61,47 +108,13 @@ const drawArrowhead = (page, x, y, size) => {
   });
 };
 
-const drawDiamond = (page, x, y, size) => {
-  const half = size * 0.34;
-  const mid = y + size * 0.3;
-  page.drawLine({
-    color: rgb(0, 0, 0),
-    end: { x: x + half, y: mid },
-    start: { x, y: mid - half },
-    thickness: 0.9,
-  });
-  page.drawLine({
-    color: rgb(0, 0, 0),
-    end: { x: x + half, y: mid + half },
-    start: { x, y: mid },
-    thickness: 0.9,
-  });
-  page.drawLine({
-    color: rgb(0, 0, 0),
-    end: { x, y: mid - half },
-    start: { x: x + half, y: mid + half },
-    thickness: 0.9,
-  });
-  page.drawLine({
-    color: rgb(0, 0, 0),
-    end: { x, y: mid + half },
-    start: { x: x + half, y: mid - half },
-    thickness: 0.9,
-  });
-};
-
 const drawBulletMarker = (page, marker, x, y, fonts) => {
   const size = BODY_SIZE;
-  if (marker === "arrow") {
-    drawArrowhead(page, x, y, size);
+  if (marker === "dot") {
+    drawText(page, "•", x, y, size, fonts.regular);
     return;
   }
-  if (marker === "diamond") {
-    drawDiamond(page, x, y, size);
-    return;
-  }
-  const glyph = { bullet: "•", dash: "-", square: "▪" }[marker] ?? "•";
-  drawText(page, glyph, x, y, size, fonts.regular);
+  drawArrowhead(page, x, y, size);
 };
 
 export class ReportWriter {
@@ -211,18 +224,12 @@ export class ReportWriter {
     this.y -= 18;
   }
 
-  paragraph(text) {
-    const lines = wrap(printable(text), this.fonts.regular, BODY_SIZE, CONTENT);
+  paragraph(text, { bold = false } = {}) {
+    const font = bold ? this.fonts.bold : this.fonts.regular;
+    const lines = wrap(printable(text), font, BODY_SIZE, CONTENT);
     for (const [index, line] of lines.entries()) {
       this.ensure(LEADING);
-      drawText(
-        this.page,
-        line,
-        PAGE.marginLeft,
-        this.y,
-        BODY_SIZE,
-        this.fonts.regular
-      );
+      drawText(this.page, line, PAGE.marginLeft, this.y, BODY_SIZE, font);
       this.y -= LEADING;
       if (index === lines.length - 2) {
         this.y -= 6;
@@ -354,7 +361,7 @@ export class ReportWriter {
     this.y -= 12;
   }
 
-  bulletMarker(marker = "bullet") {
+  bulletMarker(marker = "arrow") {
     drawBulletMarker(this.page, marker, PAGE.marginLeft, this.y, this.fonts);
   }
 
@@ -518,7 +525,7 @@ export class ReportWriter {
         break;
       }
       case "paragraph": {
-        this.paragraph(block.text);
+        this.paragraph(block.text, { bold: block.bold });
         this.y -= 6;
         break;
       }
@@ -551,8 +558,8 @@ export class ReportWriter {
    * how a reader expects a report numbered to four levels to read.
    */
   async renderChapter(chapter, index, entries) {
-    this.chapterTitle(`Chapter ${index + 1}: ${chapter.title}`);
-    const heading = chapter.introTitle || chapter.title;
+    this.chapterTitle(`Chapter ${index + 1}: ${titleCase(chapter.title)}`);
+    const heading = titleCase(chapter.introTitle || chapter.title);
     const chapterEntry = this.heading(`${index + 1}.0 ${heading}`, 1);
     entries.push({
       depth: 1,
@@ -570,8 +577,9 @@ export class ReportWriter {
   async renderSection(section, path, entries) {
     const label = path.join(".");
     const depth = Math.min(4, path.length);
-    const entry = this.heading(`${label} ${section.title}`, depth);
-    entries.push({ depth, label, page: entry.page, title: section.title });
+    const title = titleCase(section.title);
+    const entry = this.heading(`${label} ${title}`, depth);
+    entries.push({ depth, label, page: entry.page, title });
     await this.renderBlocks(section.blocks);
     for (const [childIndex, child] of (section.children || []).entries()) {
       // oxlint-disable-next-line no-await-in-loop -- pages are laid out in reading order

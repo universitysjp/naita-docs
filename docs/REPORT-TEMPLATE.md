@@ -133,6 +133,60 @@ Numbering is derived from the heading tree, so a heading can be moved or inserte
 - Figures and tables are numbered in the order the reader meets them, which is why they live inside a section instead of a list at the end.
 - Referencing your own work, as the template does, is the check that the numbering is right: "section 2.4" should be the assigned-tasks section.
 
+## What the report reads from your workspace
+
+Everything you write lives under `local/report/`. Nothing is hardcoded in the tool, and no file is required: a section with no file stays a visible question instead of a guess.
+
+```text
+local/report/
+  content/
+    work-streams.json                       optional: your own work-stream headings
+    front-matter/acknowledgement.md         one paragraph per blank-line-separated block
+    front-matter/preface.md
+    front-matter/abbreviations.md           `TERM - expansion`, one per line
+    back-matter/references.md               one citation per line
+    chapters/01-organization/nature-of-business.md
+    chapters/01-organization/organisation-structure.md
+    chapters/01-organization/management-practices.md
+    chapters/02-training-experience/placement-introduction.md
+    chapters/02-training-experience/learning-period.md
+    chapters/02-training-experience/events.md
+    chapters/03-conclusion/conclusion.md
+    chapters/03-conclusion/strengths.md
+    chapters/03-conclusion/weaknesses.md
+    chapters/03-conclusion/opportunities.md
+    chapters/03-conclusion/threats.md
+    chapters/03-conclusion/suggestions.md
+  assets/
+    organization/events/                    photographs referenced from events.md
+    register.json                            optional: permission and redaction status
+  logo.png                                  optional: cover logo (or --logo FILE)
+```
+
+In `events.md`, a `## Heading` starts a new item and `![caption](file.jpg)` under it prints that photograph from `assets/organization/events/`. A photograph that is referenced but not on disk is reported back rather than dropped silently.
+
+### Grouping the work into streams
+
+Accepted work points are grouped into streams so the report follows a piece of work rather than a calendar. The built-in list is deliberately general: _Planning, Setup, and Learning_, _Building the Work_, _Testing, Quality, and Release_, and _Documentation, Data, and Reporting_. A point matching none of them goes to _Other Recorded Work_, and nothing is ever dropped.
+
+If your placement is shaped differently, write your own headings to `content/work-streams.json`:
+
+```json
+{
+  "streams": [
+    { "id": "field", "title": "Field Work", "anchors": ["harvest", "crop"] },
+    { "id": "lab", "title": "Laboratory Work", "anchors": ["assay", "sample"] }
+  ]
+}
+```
+
+Anchors are matched as whole words, in the order given, and the first stream with the most matches wins. A missing or unreadable file falls back to the general list.
+
+### Two things the report will not print
+
+- **Repository language.** Git, commits, branches, pull requests, merges, and file paths are held back, because the report describes the work and who it was for. Held-back sentences are listed in the command result so you can reword the diary point; the rest of the point is kept.
+- **Invented facts.** A fact with no public source behind it stays a question. A blank profile field prints as `[NOT RECORDED]` on the cover rather than disappearing.
+
 ## Building it yourself
 
 ```sh

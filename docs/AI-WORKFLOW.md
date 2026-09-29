@@ -22,7 +22,7 @@ The report is a separate document built from the same local profile, weekly entr
 bun run cli -- report --json
 ```
 
-The report command writes to `local/report/output/`, uses the supplied logo at `local/report/usjp.jpg` when present, preserves missing academic/company facts as placeholders, and returns missing profile fields and incomplete diary weeks in its JSON result. Keep the editable source under `local/report/drafts/`; do not treat a `-final.pdf` filename as proof that the checklist is complete.
+The report command writes to `local/report/output/`, uses a cover logo named `logo.png`, `logo.jpg`, or `logo.jpeg` at the top of `local/report/` when one is present (`--logo FILE` overrides it), preserves missing academic/company facts as placeholders, and returns missing profile fields and incomplete diary weeks in its JSON result. Keep the editable source under `local/report/drafts/`; do not treat a `-final.pdf` filename as proof that the checklist is complete.
 
 Agents can use the CLI as their document interface. `draft --agent codex` and `draft --agent claude` ask the installed writing agent for validated diary proposals; the agent output stays separate until the student accepts it. The same agents can invoke `bun run cli -- report` from the workspace to generate a report from the current local data. The OpenTUI terminal app calls these same CLI commands through `src/tui/client.ts`, so terminal users, Codex, and Claude share one persistence and validation path.
 
